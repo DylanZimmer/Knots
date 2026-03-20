@@ -35,19 +35,19 @@ def create_tables():
             knot_id INTEGER PRIMARY KEY,
             determinant INTEGER,
             signature INTEGER,
-            unknotting_number INTEGER,
+            crossing_number INTEGER,
             genus INTEGER,
-            bridge_number INTEGER,
-            hyperbolic_volume REAL,
-            chern_simons REAL,
+            hyperbolic BOOLEAN,
             slice BOOLEAN,
             fibered BOOLEAN,
             alexander_polynomial TEXT,
             jones_polynomial TEXT,
             homfly_polynomial TEXT,
             kauffman TEXT,
-            crossing_number INTEGER,
             alternating BOOLEAN,
+            braid_index INTEGER,
+            braid_length INTEGER,
+            braid_notation TEXT,
             FOREIGN KEY(knot_id) REFERENCES knots(id)
         )
         """)
@@ -87,46 +87,46 @@ def insert_invariants(
     knot_id: int,
     determinant: Optional[int] = None,
     signature: Optional[int] = None,
-    unknotting_number: Optional[int] = None,
+    crossing_number: Optional[int] = None,
     genus: Optional[int] = None,
-    bridge_number: Optional[int] = None,
-    hyperbolic_volume: Optional[float] = None,
-    chern_simons: Optional[float] = None,
+    hyperbolic: Optional[bool] = None,
     slice_knot: Optional[bool] = None,
     fibered: Optional[bool] = None,
     alexander_polynomial: Optional[str] = None,
     jones_polynomial: Optional[str] = None,
     homfly_polynomial: Optional[str] = None,
-    kauffman: Optional[str] = None,
-    crossing_number: Optional[int] = None,
-    alternating: Optional[bool] = None
+    kauffman_polynomial: Optional[str] = None,
+    alternating: Optional[bool] = None,
+    braid_index: Optional[int] = None,
+    braid_length: Optional[int] = None,
+    braid_notation: Optional[str] = None
 ):
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
             REPLACE INTO invariants (
-                knot_id, determinant, signature, unknotting_number,
-                genus, bridge_number, hyperbolic_volume, chern_simons,
-                slice, fibered, alexander_polynomial, jones_polynomial,
-                homfly_polynomial, kauffman, crossing_number, alternating
+                knot_id, determinant, signature,
+                crossing_number, genus, hyperbolic, slice, fibered,
+                alexander_polynomial, jones_polynomial, homfly_polynomial, kauffman,
+                alternating, braid_index, braid_length, braid_notation
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             knot_id,
             determinant,
             signature,
-            unknotting_number,
+            crossing_number,
             genus,
-            bridge_number,
-            hyperbolic_volume,
-            chern_simons,
+            hyperbolic,
             slice_knot,
             fibered,
             alexander_polynomial,
             jones_polynomial,
             homfly_polynomial,
-            kauffman,
-            crossing_number,
-            alternating
+            kauffman_polynomial,
+            alternating,
+            braid_index,
+            braid_length,
+            braid_notation
         ))
         conn.commit()
 

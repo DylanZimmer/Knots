@@ -1,29 +1,28 @@
 #!/usr/bin/env sage -python
 
-from src import db
-from sage.all import Knot
+from . import db
+from sage.all import Knots
 
-"""
 def import_all_invariants(knot_id_map):
     for rolf_name, knot_id in knot_id_map.items():
-        K = Knot(rolf_name)
+        crossings, index = map(int, rolf_name.split("_"))
+        K = Knots().from_table(crossings, index)
 
         db.insert_invariants(
             knot_id=knot_id,
-            determinant=K.determinant(),
-            signature=K.signature(),
-            unknotting_number=K.unknotting_number(),
-            genus=K.genus(),
-            bridge_number=K.bridge_number(),
-            hyperbolic_volume=K.hyperbolic_volume(),
-            chern_simons=None,
-            slice_knot=K.is_slice(),
-            fibered=K.is_fibered(),
-            alexander_polynomial=str(K.alexander_polynomial()),
-            jones_polynomial=str(K.jones_polynomial()),
-            homfly_polynomial=str(K.homfly_polynomial()),
-            kauffman=str(K.kauffman_polynomial()),
-            crossing_number=K.crossing_number(),
-            alternating=K.is_alternating()
+            determinant=int(getattr(K, "determinant", lambda: 0)()),
+            signature=int(getattr(K, "signature", lambda: 0)()),
+            crossing_number=int(getattr(K, "crossing_number", lambda: 0)()),
+            genus=int(getattr(K, "genus", lambda: 0)()),
+            hyperbolic=bool(getattr(K, "is_hyperbolic", lambda: False)()),
+            slice_knot=bool(getattr(K, "is_slice", lambda: False)()),
+            fibered=bool(getattr(K, "is_fibered", lambda: False)()),
+            alexander_polynomial=str(getattr(K, "alexander_polynomial", lambda: None)() or None),
+            jones_polynomial=str(getattr(K, "jones_polynomial", lambda: None)() or None),
+            homfly_polynomial=str(getattr(K, "homfly_polynomial", lambda: None)() or None),
+            kauffman_polynomial=str(getattr(K, "kauffman_polynomial", lambda: None)() or None),
+            alternating=bool(getattr(K, "is_alternating", lambda: False)()),
+            braid_index=int(getattr(K, "braid_index", lambda: 0)()),
+            braid_length=int(getattr(K, "braid_length", lambda: 0)()),
+            braid_notation=str(getattr(K, "braid_notation", lambda: None)()),
         )
-"""

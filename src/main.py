@@ -1,8 +1,8 @@
-from src import calculations
-from src import db
-from src import populate_invariants
+from . import db
+from . import populate_invariants
 
 def main():
+    db.drop_tables()
     db.create_tables()
 
     knots_to_import = [
@@ -14,9 +14,6 @@ def main():
     id_map = db.populate_knots(knots_to_import)
 
     populate_invariants.import_all_invariants(id_map)
-
-    
-
 
 if __name__ == "__main__":
     main()
