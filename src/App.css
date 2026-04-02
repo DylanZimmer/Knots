@@ -1,0 +1,61 @@
+/* App.css */
+
+/* background color for the whole app */
+.background {
+  background-color: #f0f0f0; /* choose any color you like */
+  height: 100vh;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* container holding the knot and right boxes */
+.container {
+  display: flex;
+  width: 98%;
+  height: 98%;
+}
+
+/* left side knot box */
+.knot_box {
+  width: 70%;
+  height: 100%;
+  background-color: #cce5ff; /* light blue */
+  border: 1px solid #999;
+  box-sizing: border-box;
+}
+
+/* wrapper for right column when both boxes are present */
+.right_col {
+  width: 30%;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 10px; /* optional spacing between boxes */
+}
+
+/* moves box */
+.moves_box {
+  width: 100%;
+  height: 50%; /* half of right column if stacked */
+  background-color: #d4edda; /* light green */
+  border: 1px solid #999;
+  box-sizing: border-box;
+}
+
+/* invariants box */
+.invariants_box {
+  width: 100%;
+  height: 50%; /* half of right column if stacked */
+  background-color: #fff3cd; /* light yellow */
+  border: 1px solid #999;
+  box-sizing: border-box;
+}
+
+/* if only one of the boxes shows, make it take 30% width and full height */
+.container > .moves_box,
+.container > .invariants_box {
+  width: 30%;
+  height: 100%;
+}
