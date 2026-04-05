@@ -12,11 +12,6 @@ export function getSupabase() {
   const supabaseUrl = process.env.SUPABASE_URL
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-  console.log('getSupabase env check:', {
-    hasSupabaseUrl: Boolean(supabaseUrl),
-    hasServiceRoleKey: Boolean(supabaseKey),
-  })
-
   if (!supabaseUrl) {
     throw new Error('SUPABASE_URL is required.')
   }

@@ -1,24 +1,58 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import './App.css'
 
 function App() {
   const [showMoves] = useState(true)
   const [showInvariants] = useState(true)
+  const [knotSvg, setKnotSvg] = useState('')
+  const [svgError, setSvgError] = useState<string | null>(null)
 
-  async function addKnotEx() {
-    const res = await fetch('/api/knots', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: '1', rolf_num: '3_1', extension: '' })
-    })
-    const data = await res.json()
-    console.log('Inserted knot:', data)
-  }
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadKnotSvg() {
+      try {
+        const res = await fetch('/api/knots/svg')
+        const svg = await res.text()
+
+        if (!res.ok) {
+          throw new Error(svg || 'Failed to load knot SVG')
+        }
+
+        if (!cancelled) {
+          setKnotSvg(svg)
+          setSvgError(null)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSvgError(
+            error instanceof Error ? error.message : 'Failed to load knot SVG'
+          )
+        }
+      }
+    }
+
+    loadKnotSvg()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   return (
     <div className="background">
       <div className="container">
-        <div className="knot_box" onClick={addKnotEx}>
+        <div className="knot_box">
+          {svgError ? (
+            <p className="knot_status">{svgError}</p>
+          ) : knotSvg ? (
+            <div
+              className="knot_svg"
+              dangerouslySetInnerHTML={{ __html: knotSvg }}
+            />
+          ) : (
+            <p className="knot_status">Rendering knot...</p>
+          )}
         </div>
         {showMoves && showInvariants ? (
           <div className="right_col">
