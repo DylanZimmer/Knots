@@ -7,14 +7,12 @@ import math, json
 app = Flask(__name__)
 CORS(app)
 
-TREFOIL_PD = [[1, 5, 2, 4], [3, 1, 4, 6], [5, 3, 6, 2]]
-TREFOIL_NAME = "Trefoil"
-
 # ── helpers ──────────────────────────────────────────────────────────────────
 
-def build_cin_from_oriented_pd(
-    oriented_pd: str | list[list[int]],
-) -> list[dict]:
+def parse_cin(cin_input):
+    return json.loads(cin_input) if isinstance(cin_input, str) else cin_input
+
+def build_cin_from_oriented_pd(oriented_pd: str | list[list[int]],) -> list[dict]:
     r"""
     Build Crossings Indexed Notation (CIN) from oriented PD notation.
 
@@ -108,6 +106,28 @@ def build_oriented_pd_from_cin(cin: str | list[dict]) -> list[list[int]]:
 
 def parse_pd(pd_input):
     return json.loads(pd_input) if isinstance(pd_input, str) else pd_input
+
+def oriented_pd_to_pd(oriented_pd: str | list[list[int]]) -> list[list[int]]:
+    code = parse_pd(oriented_pd)
+    return [crossing[:4] for crossing in code]
+
+def build_pd_from_cin(cin: str | list[dict]) -> list[list[int]]:
+    oriented_pd = build_oriented_pd_from_cin(cin)
+    return oriented_pd_to_pd(oriented_pd)
+
+def get_diagram_inputs(data):
+    pd_notation = data.get('pd_notation')
+    if pd_notation:
+        return None, None, parse_pd(pd_notation)
+
+    ci_notation = data.get('ci_notation')
+    if ci_notation:
+        parsed_ci_notation = parse_cin(ci_notation)
+        oriented_pd_notation = build_oriented_pd_from_cin(parsed_ci_notation)
+        pd_notation = oriented_pd_to_pd(oriented_pd_notation)
+        return parsed_ci_notation, oriented_pd_notation, pd_notation
+
+    raise ValueError('name, pd_notation, or ci_notation is required')
 
 def segment_intersection(start_a, end_a, start_b, end_b):
     ax1,ay1=start_a; ax2,ay2=end_a; bx1,by1=start_b; bx2,by2=end_b
@@ -216,30 +236,41 @@ def draw_knot_from_pd(pd_notation, knot_name="Knot", output_path=None):
 
 @app.route('/', methods=['GET'])
 def index():
-    svg = draw_knot_from_pd(TREFOIL_PD, TREFOIL_NAME)
-    return Response(svg, mimetype='image/svg+xml')
+    return jsonify({'status': 'ok', 'message': 'POST /diagram to render a knot'})
 
 @app.route('/diagram', methods=['POST'])
 def generate_diagram():
     """
     Expects JSON body:
-      { "name": "3_1", "pd_notation": "[[1,5,2,4],[3,1,4,6],[5,3,6,2]]" }
+      { "name": "3_1", "ci_notation": "[...]" }
 
     Returns SVG as text/svg+xml.
     """
     data = request.get_json(force=True)
     knot_name = data.get('name', 'unknown')
-    #pd_string = data.get('pd_notation', '')
-    pd_string = [[1,5,2,4],[3,1,4,6],[5,3,6,2]]
-
-    if not pd_string:
-        return jsonify({'error': 'pd_notation is required'}), 400
 
     try:
-        pd_code = parse_pd(pd_string)
+        _, _, pd_code = get_diagram_inputs(data)
         link = Link(pd_code)
         svg = build_svg(link, knot_name, pd_code)
         return Response(svg, mimetype='image/svg+xml')
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/debug', methods=['POST'])
+def debug_diagram():
+    data = request.get_json(force=True)
+    knot_name = data.get('name', 'unknown')
+
+    try:
+        ci_notation, oriented_pd_notation, pd_notation = get_diagram_inputs(data)
+        return jsonify({
+            'name': knot_name,
+            'ci_notation': ci_notation,
+            'oriented_pd_notation': oriented_pd_notation,
+            'pd_notation': pd_notation,
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

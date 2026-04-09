@@ -16,14 +16,31 @@ const snappyPythonBin =
   '/home/dylan/miniforge3/bin/python3'
 const defaultDiagramPayload = {
   name: '3_1',
-  braid_notation: '[1,1,1]',
-  braid_index: 2,
+  ci_notation: JSON.stringify([
+    { crossing_id: 0, placement: 'Under', slot: 0, edges: [1, 4], sign: 1 },
+    { crossing_id: 0, placement: 'Over', slot: 1, edges: [5, 2], sign: 1 },
+    { crossing_id: 1, placement: 'Over', slot: 0, edges: [3, 6], sign: -1 },
+    { crossing_id: 1, placement: 'Under', slot: 1, edges: [1, 4], sign: -1 },
+    { crossing_id: 2, placement: 'Under', slot: 0, edges: [5, 2], sign: 1 },
+    { crossing_id: 2, placement: 'Over', slot: 1, edges: [3, 6], sign: 1 },
+  ]),
 }
 
 type DiagramPayload = {
   name: string
-  braid_notation: string
-  braid_index?: number
+  ci_notation: string
+}
+
+type SnappyDiagramPayload = {
+  name: string
+  ci_notation?: string
+  pd_notation?: string
+}
+
+type StoredDiagramRecord = {
+  name: string
+  ci_notation: string | null
+  pd_notation: string | null
 }
 
 type HttpError = Error & { status?: number }
@@ -59,21 +76,6 @@ function createHttpError(status: number, message: string) {
   return error
 }
 
-function parseBraidIndex(value: unknown) {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value
-  }
-
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Number(value)
-    if (Number.isFinite(parsed)) {
-      return parsed
-    }
-  }
-
-  return undefined
-}
-
 function parseJsonText(text: string) {
   if (!text) {
     return null
@@ -87,21 +89,45 @@ function parseJsonText(text: string) {
 }
 
 function getDiagramPayload(req: express.Request): DiagramPayload {
+  const body =
+    req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+      ? req.body
+      : {}
+
   return {
     name:
-      typeof req.query.name === 'string'
+      typeof body.name === 'string'
+        ? body.name
+        : typeof req.query.name === 'string'
         ? req.query.name
         : defaultDiagramPayload.name,
-    braid_notation:
-      typeof req.query.braid_notation === 'string'
-        ? req.query.braid_notation
-        : defaultDiagramPayload.braid_notation,
-    braid_index:
-      parseBraidIndex(req.query.braid_index) ?? defaultDiagramPayload.braid_index,
+    ci_notation:
+      typeof body.ci_notation === 'string'
+        ? body.ci_notation
+        : typeof req.query.ci_notation === 'string'
+        ? req.query.ci_notation
+        : defaultDiagramPayload.ci_notation,
   }
 }
 
-async function getStoredDiagramPayload(name: string): Promise<DiagramPayload> {
+function getRequestedKnotName(req: express.Request) {
+  const body =
+    req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+      ? req.body
+      : {}
+
+  if (typeof body.name === 'string') {
+    return body.name
+  }
+
+  if (typeof req.query.name === 'string') {
+    return req.query.name
+  }
+
+  return null
+}
+
+async function getStoredDiagramRecord(name: string): Promise<StoredDiagramRecord> {
   const supabase = getSupabase()
 
   const { data: knotRow, error: knotError } = await supabase
@@ -119,31 +145,54 @@ async function getStoredDiagramPayload(name: string): Promise<DiagramPayload> {
 
   const { data: diagramRow, error: diagramError } = await supabase
     .from('knot_diagrams')
-    .select('braid_notation')
+    .select('ci_notation, pd_notation')
     .eq('knot_id', knotId)
     .single()
 
-  if (diagramError || !diagramRow?.braid_notation) {
-    console.error('Braid notation not found for:', name, diagramError)
-    throw createHttpError(404, `No braid notation for '${name}'`)
-  }
-
-  const { data: combinatorialRow, error: combinatorialError } = await supabase
-    .from('knot_combinatorial')
-    .select('braid_index')
-    .eq('knot_id', knotId)
-    .single()
-
-  if (combinatorialError || combinatorialRow?.braid_index == null) {
-    console.error('Braid index not found for:', name, combinatorialError)
-    throw createHttpError(404, `No braid index for '${name}'`)
+  if (diagramError || !diagramRow) {
+    console.error('Diagram data not found for:', name, diagramError)
+    throw createHttpError(404, `No diagram data for '${name}'`)
   }
 
   return {
     name,
-    braid_notation: diagramRow.braid_notation,
-    braid_index: Number(combinatorialRow.braid_index),
+    ci_notation: diagramRow.ci_notation ?? null,
+    pd_notation: diagramRow.pd_notation ?? null,
   }
+}
+
+async function getStoredDiagramPayload(name: string): Promise<DiagramPayload> {
+  const diagram = await getStoredDiagramRecord(name)
+
+  if (!diagram.ci_notation) {
+    console.error('CI notation not found for:', name)
+    throw createHttpError(404, `No ci_notation for '${name}'`)
+  }
+
+  return {
+    name: diagram.name,
+    ci_notation: diagram.ci_notation,
+  }
+}
+
+async function getStoredSnappyPayload(name: string): Promise<SnappyDiagramPayload> {
+  const diagram = await getStoredDiagramRecord(name)
+
+  if (diagram.pd_notation) {
+    return {
+      name: diagram.name,
+      pd_notation: diagram.pd_notation,
+    }
+  }
+
+  if (diagram.ci_notation) {
+    return {
+      name: diagram.name,
+      ci_notation: diagram.ci_notation,
+    }
+  }
+
+  throw createHttpError(404, `No usable diagram notation for '${name}'`)
 }
 
 function startSnappyProcess() {
@@ -236,14 +285,18 @@ process.on('SIGTERM', () => {
   process.exit(0)
 })
 
-router.get('/svg', async (req, res) => {
+async function handleSvg(req: express.Request, res: express.Response) {
   try {
     await ensureSnappyServer()
+    const requestedName = getRequestedKnotName(req)
+    const snappyPayload = requestedName
+      ? await getStoredSnappyPayload(requestedName)
+      : getDiagramPayload(req)
 
     const diagramRes = await fetch(`${snappyBaseUrl}/diagram`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(getDiagramPayload(req)),
+      body: JSON.stringify(snappyPayload),
     })
 
     const body = await diagramRes.text()
@@ -266,9 +319,9 @@ router.get('/svg', async (req, res) => {
     console.error('GET /api/knots/svg failed:', err)
     res.status(500).send(err instanceof Error ? err.message : 'SVG render failed')
   }
-})
+}
 
-router.get('/debug', async (req, res) => {
+async function handleDebug(req: express.Request, res: express.Response) {
   try {
     await ensureSnappyServer()
 
@@ -306,13 +359,38 @@ router.get('/debug', async (req, res) => {
       error: err instanceof Error ? err.message : 'Debug render failed',
     })
   }
+}
+
+router.get('/svg', handleSvg)
+router.post('/svg', handleSvg)
+
+router.get('/debug', handleDebug)
+router.post('/debug', handleDebug)
+
+router.get('/:name', async (req, res) => {
+  const { name } = req.params
+
+  try {
+    const payload = await getStoredDiagramPayload(name)
+    res.json(payload)
+  } catch (err) {
+    const status =
+      typeof (err as HttpError).status === 'number'
+        ? (err as HttpError).status!
+        : 500
+
+    console.error(`GET /api/knots/${name} failed:`, err)
+    res.status(status).json({
+      error: err instanceof Error ? err.message : 'Could not load knot',
+    })
+  }
 })
 
 router.get('/:name/diagram', async (req, res) => {
   const { name } = req.params
 
   try {
-    const payload = await getStoredDiagramPayload(name)
+    const payload = await getStoredSnappyPayload(name)
     await ensureSnappyServer()
 
     const diagramRes = await fetch(`${snappyBaseUrl}/diagram`, {

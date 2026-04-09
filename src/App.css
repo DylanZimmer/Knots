@@ -63,6 +63,30 @@
   background-color: #d4edda; /* light green */
   border: 1px solid #999;
   box-sizing: border-box;
+  padding: 20px;
+}
+
+.moves_controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.moves_label {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #21496d;
+}
+
+.moves_select {
+  width: 100%;
+  max-width: 220px;
+  padding: 10px 12px;
+  border: 1px solid #7aa38a;
+  border-radius: 8px;
+  background-color: #fff;
+  color: #21496d;
+  font-size: 1rem;
 }
 
 /* invariants box */
