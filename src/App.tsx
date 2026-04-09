@@ -6,6 +6,8 @@ function App() {
   const [showInvariants] = useState(true)
   const [knotSvg, setKnotSvg] = useState('')
   const [svgError, setSvgError] = useState<string | null>(null)
+  const [debugJson, setDebugJson] = useState('')
+  const [debugError, setDebugError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -39,6 +41,38 @@ function App() {
     }
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadKnotDebug() {
+      try {
+        const res = await fetch('/api/knots/debug')
+        const json = await res.json()
+
+        if (!res.ok) {
+          throw new Error(json?.error || 'Failed to load knot debug data')
+        }
+
+        if (!cancelled) {
+          setDebugJson(JSON.stringify(json, null, 2))
+          setDebugError(null)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setDebugError(
+            error instanceof Error ? error.message : 'Failed to load knot debug data'
+          )
+        }
+      }
+    }
+
+    loadKnotDebug()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   return (
     <div className="background">
       <div className="container">
@@ -57,7 +91,15 @@ function App() {
         {showMoves && showInvariants ? (
           <div className="right_col">
             <div className="moves_box"></div>
-            <div className="invariants_box"></div>
+            <div className="invariants_box">
+              {debugError ? (
+                <p className="knot_status">{debugError}</p>
+              ) : debugJson ? (
+                <pre className="knot_status">{debugJson}</pre>
+              ) : (
+                <p className="knot_status">Loading debugger...</p>
+              )}
+            </div>
           </div>
         ) : (
           <>
