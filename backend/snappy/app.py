@@ -116,9 +116,15 @@ def build_pd_from_cin(cin: str | list[dict]) -> list[list[int]]:
     return oriented_pd_to_pd(oriented_pd)
 
 def get_diagram_inputs(data):
+    oriented_pd_notation = data.get('oriented_pd_notation')
+    if oriented_pd_notation:
+        parsed_oriented_pd = parse_pd(oriented_pd_notation)
+        pd_notation = oriented_pd_to_pd(parsed_oriented_pd)
+        return None, parsed_oriented_pd, pd_notation
+
     pd_notation = data.get('pd_notation')
     if pd_notation:
-        return None, None, parse_pd(pd_notation)
+        raise ValueError('oriented_pd_notation or ci_notation is required for oriented rendering')
 
     ci_notation = data.get('ci_notation')
     if ci_notation:
@@ -139,12 +145,28 @@ def segment_intersection(start_a, end_a, start_b, end_b):
 def segment_direction(start,end):
     return "vertical" if start[0]==end[0] else "horizontal"
 
-def build_svg(link, knot_name, pd_code):
+def build_svg(link, knot_name, oriented_pd_code):
     W,H=500,500; MARGIN=60; STROKE=10; GAP_STROKE=18; GAP_HALF=18; FONT=13
     INNER_W=W-2*MARGIN; INNER_H=H-2*MARGIN
 
     diagram = OrthogonalLinkDiagram(link)
     vertex_positions, arrows, crossing_specs = diagram.plink_data()
+    n_arrows = len(arrows)
+
+    crossing_arrow_indices = set()
+    for under_idx, over_idx, _, label in crossing_specs:
+        crossing_arrow_indices.add(under_idx)
+        crossing_arrow_indices.add(over_idx)
+
+    arc_segments = []
+    current = []
+    for i, (si, ei) in enumerate(arrows):
+        current.append((si, ei))
+        if i in crossing_arrow_indices:
+            arc_segments.append(current)
+            current = []
+    if current:
+        arc_segments[0] = current + arc_segments[0]
 
     xs=[x for x,_ in vertex_positions]; ys=[y for _,y in vertex_positions]
     min_x,max_x=min(xs),max(xs); min_y,max_y=min(ys),max(ys)
@@ -165,28 +187,93 @@ def build_svg(link, knot_name, pd_code):
             svg_vertices[arrows[under_idx][0]], svg_vertices[arrows[under_idx][1]],
             svg_vertices[arrows[over_idx][0]],  svg_vertices[arrows[over_idx][1]])
 
-    # Arc label positions: midpoint between the two crossings sharing that arc,
-    # offset perpendicular by a small amount to avoid sitting on the strand.
-    arc_to_crossings = {}
-    for ci, crossing in enumerate(pd_code):
-        cp = crossing_points.get(ci)
-        if cp is None: continue
-        for arc_id in crossing[:4]:
-            arc_to_crossings.setdefault(arc_id, []).append(cp)
+    # For each crossing, get the outgoing segment directions directly from crossing_specs.
+    # The segment arriving at crossing is arrows[under_idx] / arrows[over_idx].
+    # The segment leaving is the next one in the cycle.
+    # This gives exact H or V direction vectors.
+    crossing_out_directions = {}  # ci -> (under_out_glyph, over_out_glyph)
+    for under_idx, over_idx, _, ci in crossing_specs:
+        under_out_si, under_out_ei = arrows[(under_idx + 1) % n_arrows]
+        over_out_si,  over_out_ei  = arrows[(over_idx  + 1) % n_arrows]
 
+        def seg_glyph(si, ei):
+            x1,y1 = svg_vertices[si]; x2,y2 = svg_vertices[ei]
+            dx,dy = x2-x1, y2-y1
+            if abs(dx) >= abs(dy):
+                return '▶' if dx >= 0 else '◀'
+            else:
+                return '▼' if dy >= 0 else '▲'
+
+        def seg_dir(si, ei):
+            x1,y1 = svg_vertices[si]; x2,y2 = svg_vertices[ei]
+            dx,dy = x2-x1, y2-y1
+            length = math.sqrt(dx*dx+dy*dy) or 1
+            return dx/length, dy/length
+
+        crossing_out_directions[ci] = {
+            'under_glyph': seg_glyph(under_out_si, under_out_ei),
+            'under_dir':   seg_dir(under_out_si, under_out_ei),
+            'over_glyph':  seg_glyph(over_out_si, over_out_ei),
+            'over_dir':    seg_dir(over_out_si, over_out_ei),
+        }
+
+    # Arc midpoints by walking longer dimension
     arc_midpoints = {}
-    for arc_id, pts in arc_to_crossings.items():
-        if len(pts)==2:
-            x1,y1=pts[0]; x2,y2=pts[1]
-            mx,my=(x1+x2)/2,(y1+y2)/2
-            # Perpendicular offset
-            dx,dy=x2-x1,y2-y1
-            length=math.sqrt(dx*dx+dy*dy) or 1
-            px,py=-dy/length,dx/length  # perpendicular unit vector
-            arc_midpoints[arc_id]=(mx+px*15, my+py*15)
-        elif len(pts)==1:
-            x,y=pts[0]
-            arc_midpoints[arc_id]=(x+20,y-20)
+    for idx, arc in enumerate(arc_segments):
+        total_h = sum(abs(vertex_positions[ei][0] - vertex_positions[si][0]) for si,ei in arc)
+        total_v = sum(abs(vertex_positions[ei][1] - vertex_positions[si][1]) for si,ei in arc)
+
+        if total_h >= total_v:
+            target_h = total_h / 2
+            target_v = total_v
+        else:
+            target_h = total_h
+            target_v = total_v / 2
+
+        spent_h = 0.0
+        spent_v = 0.0
+        mx, my = svg_vertices[arc[0][0]]
+        for si, ei in arc:
+            x1,y1 = svg_vertices[si]
+            x2,y2 = svg_vertices[ei]
+            seg_h = abs(x2-x1)
+            seg_v = abs(y2-y1)
+            if seg_h > 0:
+                remaining = target_h - spent_h
+                if remaining <= seg_h:
+                    t = remaining / seg_h
+                    mx = x1 + t*(x2-x1)
+                    my = y1
+                    spent_h = target_h
+                else:
+                    spent_h += seg_h
+                    mx,my = x2,y2
+            else:
+                remaining = target_v - spent_v
+                if remaining <= seg_v:
+                    t = remaining / seg_v
+                    mx = x1
+                    my = y1 + t*(y2-y1)
+                    spent_v = target_v
+                else:
+                    spent_v += seg_v
+                    mx,my = x2,y2
+
+        arc_midpoints[idx] = (mx, my)
+
+    arc_entry_crossing = {}
+    arc_exit_crossing = {}
+    for ci, crossing in enumerate(oriented_pd_code):
+        for pos, arc_id in enumerate(crossing[:4]):
+            if pos % 2 == 1:
+                arc_entry_crossing[arc_id] = ci
+            else:
+                arc_exit_crossing[arc_id] = ci
+
+    all_arc_ids = set()
+    for crossing in oriented_pd_code:
+        for arc_id in crossing[:4]:
+            all_arc_ids.add(arc_id)
 
     lines=[
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
@@ -195,42 +282,98 @@ def build_svg(link, knot_name, pd_code):
         f'font-size="16" font-weight="bold" fill="#333">{knot_name}</text>',
     ]
 
-    for si,ei in arrows:
+    # Strands
+    for si, ei in arrows:
         x1,y1=svg_vertices[si]; x2,y2=svg_vertices[ei]
-        lines.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="#1f4f82" stroke-width="{STROKE}" stroke-linecap="round"/>')
+        lines.append(
+            f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
+            f'stroke="#1f4f82" stroke-width="{STROKE}" stroke-linecap="round"/>'
+        )
 
+    # Crossing gaps and patches
     for under_idx,over_idx,_,label in crossing_specs:
         cx,cy=crossing_points[label]
         us=svg_vertices[arrows[under_idx][0]]; ue=svg_vertices[arrows[under_idx][1]]
         os=svg_vertices[arrows[over_idx][0]];  oe=svg_vertices[arrows[over_idx][1]]
         gap=(cx-GAP_HALF,cy,cx+GAP_HALF,cy) if segment_direction(us,ue)=="horizontal" else (cx,cy-GAP_HALF,cx,cy+GAP_HALF)
         patch=(cx-GAP_HALF,cy,cx+GAP_HALF,cy) if segment_direction(os,oe)=="horizontal" else (cx,cy-GAP_HALF,cx,cy+GAP_HALF)
-        lines.append(f'<line x1="{gap[0]:.1f}" y1="{gap[1]:.1f}" x2="{gap[2]:.1f}" y2="{gap[3]:.1f}" stroke="#fafafa" stroke-width="{GAP_STROKE}" stroke-linecap="round"/>')
-        lines.append(f'<line x1="{patch[0]:.1f}" y1="{patch[1]:.1f}" x2="{patch[2]:.1f}" y2="{patch[3]:.1f}" stroke="#1f4f82" stroke-width="{STROKE}" stroke-linecap="round"/>')
+        lines.append(
+            f'<line x1="{gap[0]:.1f}" y1="{gap[1]:.1f}" x2="{gap[2]:.1f}" y2="{gap[3]:.1f}" '
+            f'stroke="#fafafa" stroke-width="{GAP_STROKE}" stroke-linecap="round"/>'
+        )
+        lines.append(
+            f'<line x1="{patch[0]:.1f}" y1="{patch[1]:.1f}" x2="{patch[2]:.1f}" y2="{patch[3]:.1f}" '
+            f'stroke="#1f4f82" stroke-width="{STROKE}" stroke-linecap="round"/>'
+        )
 
-    for arc_id,(mx,my) in arc_midpoints.items():
-        lines.append(f'<circle cx="{mx:.1f}" cy="{my:.1f}" r="10" fill="#e8f4f8" stroke="#6baed6" stroke-width="1.5"/>')
-        lines.append(f'<text x="{mx:.1f}" y="{my+4:.1f}" text-anchor="middle" font-size="{FONT}" fill="#2166ac">{arc_id}</text>')
+    # Two orientation glyphs per crossing using exact H/V outgoing directions.
+    # [a,b,c,d,sign]: under out = c (always), over out = d if +1, b if -1.
+    # under out direction = arrows[(under_idx+1) % n]
+    # over out direction  = arrows[(over_idx+1)  % n]
+    GLYPH_OFFSET = 32
+    for under_idx, over_idx, _, ci in crossing_specs:
+        if ci not in crossing_points:
+            continue
+        cx, cy = crossing_points[ci]
+        sign = oriented_pd_code[ci][4]
+        dirs = crossing_out_directions[ci]
 
-    for idx,c in enumerate(link.crossings):
-        x,y=crossing_points.get(idx,(W/2,H/2))
-        sign=c.sign; sc="+" if sign==1 else "−"; col="#d73027" if sign==1 else "#4575b4"
-        lines.append(f'<circle cx="{x+16:.1f}" cy="{y-16:.1f}" r="12" fill="white" stroke="{col}" stroke-width="2.5"/>')
-        lines.append(f'<text x="{x+16:.1f}" y="{y-18:.1f}" text-anchor="middle" font-size="{FONT}" font-weight="bold" fill="{col}">c{idx}</text>')
-        lines.append(f'<text x="{x+16:.1f}" y="{y-7:.1f}" text-anchor="middle" font-size="10" fill="#555">{sc}</text>')
+        # Under strand always uses under_out direction
+        under_glyph = dirs['under_glyph']
+        udx, udy = dirs['under_dir']
+        lines.append(
+            f'<text x="{cx + udx*GLYPH_OFFSET:.1f}" y="{cy + udy*GLYPH_OFFSET + 5:.1f}" '
+            f'text-anchor="middle" font-size="14" fill="#f0a500" font-weight="bold">{under_glyph}</text>'
+        )
 
-    lines.append(f'<text x="10" y="{H-18}" font-size="11" fill="#888">c# = crossing · arc labels from PD notation · <tspan fill="#d73027">red=positive</tspan> <tspan fill="#4575b4">blue=negative</tspan></text>')
+        # Over strand direction depends on sign
+        # +1: over goes d->b, outgoing is toward b, which is the over_out segment
+        # -1: over goes b->d, outgoing is toward d, which is also the over_out segment
+        # In both cases the physical outgoing segment is the same — arrows[(over_idx+1)%n]
+        # The sign already determined which end is outgoing when the PD code was built
+        over_glyph = dirs['over_glyph']
+        odx, ody = dirs['over_dir']
+        lines.append(
+            f'<text x="{cx + odx*GLYPH_OFFSET:.1f}" y="{cy + ody*GLYPH_OFFSET + 5:.1f}" '
+            f'text-anchor="middle" font-size="14" fill="#f0a500" font-weight="bold">{over_glyph}</text>'
+        )
+
+    # Arc labels at midpoints, offset perpendicular to strand direction
+    for arc_id in sorted(all_arc_ids):
+        idx = arc_id - 1
+        if idx not in arc_midpoints:
+            continue
+        mx, my = arc_midpoints[idx]
+        exit_ci = arc_exit_crossing.get(arc_id)
+        entry_ci = arc_entry_crossing.get(arc_id)
+        if exit_ci is None or entry_ci is None:
+            continue
+        x1,y1 = crossing_points[exit_ci]
+        x2,y2 = crossing_points[entry_ci]
+        dx,dy = x2-x1, y2-y1
+        length = math.sqrt(dx*dx+dy*dy) or 1
+        dx,dy = dx/length, dy/length
+        px,py = -dy, dx
+        lx = mx + px*20
+        ly = my + py*20
+        lines.append(
+            f'<text x="{lx:.1f}" y="{ly+5:.1f}" text-anchor="middle" '
+            f'font-size="15" font-weight="bold" fill="#e6550d">{arc_id}</text>'
+        )
+
+    # Crossing labels — blue=positive, red=negative
+    for idx, c in enumerate(link.crossings):
+        if idx not in crossing_points:
+            continue
+        x, y = crossing_points[idx]
+        col = "#4575b4" if c.sign == 1 else "#d73027"
+        lines.append(
+            f'<text x="{x+16:.1f}" y="{y-12:.1f}" text-anchor="middle" '
+            f'font-size="{FONT}" font-weight="bold" fill="{col}">c{idx}</text>'
+        )
+
     lines.append('</svg>')
     return '\n'.join(lines)
-
-def draw_knot_from_pd(pd_notation, knot_name="Knot", output_path=None):
-    pd_code=parse_pd(pd_notation)
-    link=Link(pd_code)
-    svg=build_svg(link,knot_name,pd_code)
-    if output_path:
-        with open(output_path,'w') as f: f.write(svg)
-    return svg
-
 
 # ── routes ────────────────────────────────────────────────────────────────────
 
@@ -250,9 +393,9 @@ def generate_diagram():
     knot_name = data.get('name', 'unknown')
 
     try:
-        _, _, pd_code = get_diagram_inputs(data)
+        _, oriented_pd_code, pd_code = get_diagram_inputs(data)
         link = Link(pd_code)
-        svg = build_svg(link, knot_name, pd_code)
+        svg = build_svg(link, knot_name, oriented_pd_code)
         return Response(svg, mimetype='image/svg+xml')
     except Exception as e:
         return jsonify({'error': str(e)}), 500

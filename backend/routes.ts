@@ -1,14 +1,23 @@
 import express from 'express'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { statSync } from 'node:fs'
+import { statSync, watch, type FSWatcher } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { insertKnot } from './db/fxns'
 import { getSupabase } from './supabase'
 
 const router = express.Router()
 const snappyDirPath = fileURLToPath(new URL('./snappy/', import.meta.url))
+const snappyPopulateDbDirPath = fileURLToPath(
+  new URL('./snappy/populate_db/', import.meta.url),
+)
 const snappyAppPath = fileURLToPath(new URL('./snappy/app.py', import.meta.url))
 const snappyServePath = fileURLToPath(new URL('./snappy/serve.py', import.meta.url))
+const snappyPopulateDbCinPath = fileURLToPath(
+  new URL('./snappy/populate_db/cin_from_oriented_pd.py', import.meta.url),
+)
+const snappyPopulateDbOrientedPath = fileURLToPath(
+  new URL('./snappy/populate_db/oriented_pd.py', import.meta.url),
+)
 const snappyBaseUrl = 'http://127.0.0.1:5000'
 const snappyPythonBin =
   process.env.SNAPPY_PYTHON_BIN ||
@@ -34,13 +43,14 @@ type DiagramPayload = {
 type SnappyDiagramPayload = {
   name: string
   ci_notation?: string
-  pd_notation?: string
+  oriented_pd_notation?: string
 }
 
 type StoredDiagramRecord = {
   name: string
   ci_notation: string | null
   pd_notation: string | null
+  oriented_pd_notation: string | null
 }
 
 type HttpError = Error & { status?: number }
@@ -49,6 +59,8 @@ let snappyProcess: ChildProcessWithoutNullStreams | null = null
 let snappyBootPromise: Promise<void> | null = null
 let snappyLastError = ''
 let snappySourceVersion = 0
+let snappyWatchers: FSWatcher[] = []
+let snappyRestartTimer: ReturnType<typeof setTimeout> | null = null
 
 async function sleep(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms))
@@ -58,6 +70,8 @@ function getSnappySourceVersion() {
   return Math.max(
     statSync(snappyAppPath).mtimeMs,
     statSync(snappyServePath).mtimeMs,
+    statSync(snappyPopulateDbCinPath).mtimeMs,
+    statSync(snappyPopulateDbOrientedPath).mtimeMs,
   )
 }
 
@@ -145,7 +159,7 @@ async function getStoredDiagramRecord(name: string): Promise<StoredDiagramRecord
 
   const { data: diagramRow, error: diagramError } = await supabase
     .from('knot_diagrams')
-    .select('ci_notation, pd_notation')
+    .select('ci_notation, pd_notation, oriented_pd_notation')
     .eq('knot_id', knotId)
     .single()
 
@@ -158,6 +172,7 @@ async function getStoredDiagramRecord(name: string): Promise<StoredDiagramRecord
     name,
     ci_notation: diagramRow.ci_notation ?? null,
     pd_notation: diagramRow.pd_notation ?? null,
+    oriented_pd_notation: diagramRow.oriented_pd_notation ?? null,
   }
 }
 
@@ -178,10 +193,10 @@ async function getStoredDiagramPayload(name: string): Promise<DiagramPayload> {
 async function getStoredSnappyPayload(name: string): Promise<SnappyDiagramPayload> {
   const diagram = await getStoredDiagramRecord(name)
 
-  if (diagram.pd_notation) {
+  if (diagram.oriented_pd_notation) {
     return {
       name: diagram.name,
-      pd_notation: diagram.pd_notation,
+      oriented_pd_notation: diagram.oriented_pd_notation,
     }
   }
 
@@ -203,8 +218,12 @@ function startSnappyProcess() {
   snappyLastError = ''
   snappySourceVersion = getSnappySourceVersion()
   console.log(`Starting snappy with ${snappyPythonBin}`)
-  snappyProcess = spawn(snappyPythonBin, [snappyServePath], {
+  snappyProcess = spawn(snappyPythonBin, ['-u', snappyServePath], {
     cwd: snappyDirPath,
+    env: {
+      ...process.env,
+      PYTHONUNBUFFERED: '1',
+    },
     stdio: 'pipe',
   })
 
@@ -222,6 +241,52 @@ function startSnappyProcess() {
     snappyProcess = null
     snappyBootPromise = null
   })
+}
+
+function scheduleSnappyRestart() {
+  if (process.env.NODE_ENV === 'production') {
+    return
+  }
+
+  if (snappyRestartTimer) {
+    clearTimeout(snappyRestartTimer)
+  }
+
+  snappyRestartTimer = setTimeout(() => {
+    snappyRestartTimer = null
+    console.log('Restarting snappy to pick up Python changes')
+    shutdownSnappyServer()
+    void ensureSnappyServer().catch((err) => {
+      console.error('Failed to restart snappy after file change:', err)
+    })
+  }, 150)
+
+  snappyRestartTimer.unref?.()
+}
+
+function startSnappyWatchers() {
+  if (snappyWatchers.length > 0 || process.env.NODE_ENV === 'production') {
+    return
+  }
+
+  for (const watchPath of [
+    snappyDirPath,
+    snappyPopulateDbDirPath,
+  ]) {
+    const watcher = watch(watchPath, (_eventType, filename) => {
+      if (typeof filename !== 'string' || !filename.endsWith('.py')) {
+        return
+      }
+
+      scheduleSnappyRestart()
+    })
+
+    watcher.on('error', (err) => {
+      console.error(`Snappy watch failed for ${watchPath}:`, err)
+    })
+
+    snappyWatchers.push(watcher)
+  }
 }
 
 async function ensureSnappyServer() {
@@ -275,12 +340,29 @@ function shutdownSnappyServer() {
   }
 }
 
+function shutdownSnappyWatchers() {
+  if (snappyRestartTimer) {
+    clearTimeout(snappyRestartTimer)
+    snappyRestartTimer = null
+  }
+
+  for (const watcher of snappyWatchers) {
+    watcher.close()
+  }
+
+  snappyWatchers = []
+}
+
+startSnappyWatchers()
+
 process.on('exit', shutdownSnappyServer)
 process.on('SIGINT', () => {
+  shutdownSnappyWatchers()
   shutdownSnappyServer()
   process.exit(0)
 })
 process.on('SIGTERM', () => {
+  shutdownSnappyWatchers()
   shutdownSnappyServer()
   process.exit(0)
 })
