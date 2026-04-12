@@ -290,6 +290,17 @@ def build_svg(vertex_positions, arrows, crossing_specs, knot_name):
             lines.append(orientation_arrow_svg(ex, ey, dx, dy))
             lx = ex + ux * 16
             ly = ey + uy * 16
+            if abs(dx) >= abs(dy):
+                arc_label = 2 * label
+            else:
+                arc_label = 2 * label + 1
+            lines.append(
+                f'<text x="{lx:.1f}" y="{ly:.1f}" text-anchor="middle" '
+                f'dominant-baseline="central" font-size="{FONT}" font-weight="bold" '
+                f'fill="#333" stroke="#fafafa" stroke-width="2" paint-order="stroke"></text>'
+            )
+            lx = ex + ux * 16
+            ly = ey + uy * 16
             lines.append(
                 f'<text x="{lx:.1f}" y="{ly:.1f}" text-anchor="middle" '
                 f'dominant-baseline="central" font-size="{FONT}" font-weight="bold" '
