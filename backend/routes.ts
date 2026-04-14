@@ -53,6 +53,10 @@ type StoredDiagramRecord = {
   oriented_pd_notation: string | null
 }
 
+type KnotOptionRecord = {
+  name: string
+}
+
 type HttpError = Error & { status?: number }
 
 let snappyProcess: ChildProcessWithoutNullStreams | null = null
@@ -448,6 +452,32 @@ router.post('/svg', handleSvg)
 
 router.get('/debug', handleDebug)
 router.post('/debug', handleDebug)
+
+router.get('/', async (_req, res) => {
+  try {
+    const supabase = getSupabase()
+
+    const { data, error } = await supabase
+      .from('knots')
+      .select('name')
+      .order('name', { ascending: true })
+
+    if (error) {
+      throw error
+    }
+
+    const knotNames = (data ?? [])
+      .map((row: KnotOptionRecord) => row.name)
+      .filter((name): name is string => typeof name === 'string' && name.length > 0)
+
+    res.json(knotNames)
+  } catch (err) {
+    console.error('GET /api/knots failed:', err)
+    res.status(500).json({
+      error: err instanceof Error ? err.message : 'Could not load knot list',
+    })
+  }
+})
 
 router.get('/:name', async (req, res) => {
   const { name } = req.params

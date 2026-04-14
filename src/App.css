@@ -72,21 +72,38 @@
   gap: 8px;
 }
 
+.moves_inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+  align-items: center;
+}
+
 .moves_label {
   font-size: 0.95rem;
   font-weight: 600;
   color: #21496d;
 }
 
-.moves_select {
+.moves_input {
   width: 100%;
-  max-width: 220px;
   padding: 10px 12px;
   border: 1px solid #7aa38a;
   border-radius: 8px;
   background-color: #fff;
   color: #21496d;
   font-size: 1rem;
+}
+
+.moves_hint {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #21496d;
+}
+
+.moves_hint code {
+  font-family: inherit;
+  font-weight: 700;
 }
 
 /* invariants box */

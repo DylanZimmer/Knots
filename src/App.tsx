@@ -1,23 +1,153 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 
-const knotOptions = ['3_1', '4_1', '5_1', '5_2']
-
 type DiagramPayload = {
   name: string
   ci_notation: string
 }
 
+type KnotParts = {
+  prefix: string
+  suffix: string
+}
+
+function parseKnotName(name: string): KnotParts | null {
+  const [prefix, suffix, ...rest] = name.trim().split('_')
+
+  if (!prefix || !suffix || rest.length > 0) {
+    return null
+  }
+
+  return { prefix: prefix.trim(), suffix: suffix.trim() }
+}
+
+function getUniqueSorted(values: string[]) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort(
+    (left, right) => {
+      const leftNumber = Number(left)
+      const rightNumber = Number(right)
+
+      if (Number.isInteger(leftNumber) && Number.isInteger(rightNumber)) {
+        return leftNumber - rightNumber
+      }
+
+      return left.localeCompare(right, undefined, { numeric: true })
+    },
+  )
+}
+
 function App() {
   const [showMoves] = useState(true)
   const [showInvariants] = useState(true)
+  const [knotNames, setKnotNames] = useState<string[]>([])
+  const [knotOptionsLoading, setKnotOptionsLoading] = useState(true)
+  const [knotListError, setKnotListError] = useState<string | null>(null)
+  const [selectedN1, setSelectedN1] = useState('')
+  const [selectedN2, setSelectedN2] = useState('')
   const [diagramPayload, setDiagramPayload] = useState<DiagramPayload | null>(null)
   const [payloadError, setPayloadError] = useState<string | null>(null)
   const [knotSvg, setKnotSvg] = useState('')
   const [svgError, setSvgError] = useState<string | null>(null)
   const [debugJson, setDebugJson] = useState('')
   const [debugError, setDebugError] = useState<string | null>(null)
-  const [selectedKnot, setSelectedKnot] = useState(knotOptions[0])
+
+  const parsedKnots = knotNames
+    .map(parseKnotName)
+    .filter((knot): knot is KnotParts => knot !== null)
+  const knotN1Options = getUniqueSorted(parsedKnots.map((knot) => knot.prefix))
+  const knotN2Options = getUniqueSorted(
+    parsedKnots
+      .filter((knot) => knot.prefix === selectedN1)
+      .map((knot) => knot.suffix),
+  )
+  const knotName =
+    selectedN1 && selectedN2 && knotN2Options.includes(selectedN2)
+      ? `${selectedN1}_${selectedN2}`
+      : ''
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadKnotNames() {
+      try {
+        const res = await fetch('/api/knots')
+        const payload = await res.json()
+
+        if (!res.ok) {
+          throw new Error(payload?.error || 'Failed to load knot list')
+        }
+
+        if (!Array.isArray(payload) || !payload.every((item) => typeof item === 'string')) {
+          throw new Error('Unexpected knot list response')
+        }
+
+        if (!cancelled) {
+          setKnotNames(payload)
+          setKnotListError(null)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setKnotNames([])
+          setSelectedN1('')
+          setSelectedN2('')
+          setKnotListError(
+            error instanceof Error ? error.message : 'Failed to load knot list',
+          )
+        }
+      } finally {
+        if (!cancelled) {
+          setKnotOptionsLoading(false)
+        }
+      }
+    }
+
+    loadKnotNames()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    const availableN1Options = getUniqueSorted(
+      knotNames
+        .map(parseKnotName)
+        .filter((knot): knot is KnotParts => knot !== null)
+        .map((knot) => knot.prefix),
+    )
+
+    if (availableN1Options.length === 0) {
+      setSelectedN1('')
+      return
+    }
+
+    setSelectedN1((current) =>
+      current && availableN1Options.includes(current)
+        ? current
+        : availableN1Options[0],
+    )
+  }, [knotNames])
+
+  useEffect(() => {
+    const availableN2Options = getUniqueSorted(
+      knotNames
+        .map(parseKnotName)
+        .filter((knot): knot is KnotParts => knot !== null)
+        .filter((knot) => knot.prefix === selectedN1)
+        .map((knot) => knot.suffix),
+    )
+
+    if (!selectedN1 || availableN2Options.length === 0) {
+      setSelectedN2('')
+      return
+    }
+
+    setSelectedN2((current) =>
+      current && availableN2Options.includes(current)
+        ? current
+        : availableN2Options[0],
+    )
+  }, [knotNames, selectedN1])
 
   useEffect(() => {
     let cancelled = false
@@ -29,9 +159,13 @@ function App() {
     setDebugJson('')
     setDebugError(null)
 
+    if (!knotName) {
+      return
+    }
+
     async function loadDiagramPayload() {
       try {
-        const res = await fetch(`/api/knots/${selectedKnot}`)
+        const res = await fetch(`/api/knots/${knotName}`)
         const payload = await res.json()
 
         if (!res.ok) {
@@ -56,7 +190,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [selectedKnot])
+  }, [knotName])
 
   useEffect(() => {
     if (!diagramPayload) {
@@ -141,21 +275,57 @@ function App() {
   const movesContent = (
     <div className="moves_box">
       <div className="moves_controls">
-        <label className="moves_label" htmlFor="knot-select">
-          Knot
-        </label>
-        <select
-          id="knot-select"
-          className="moves_select"
-          value={selectedKnot}
-          onChange={(event) => setSelectedKnot(event.target.value)}
-        >
-          {knotOptions.map((knot) => (
-            <option key={knot} value={knot}>
-              {knot}
-            </option>
-          ))}
-        </select>
+        <div className="moves_inputs">
+          <label className="moves_label" htmlFor="knot-prefix">
+            n1
+          </label>
+          <select
+            id="knot-prefix"
+            className="moves_input"
+            value={selectedN1}
+            disabled={knotOptionsLoading || knotN1Options.length === 0}
+            onChange={(event) => setSelectedN1(event.target.value)}
+          >
+            {knotOptionsLoading ? (
+              <option value="">Loading knots...</option>
+            ) : knotN1Options.length === 0 ? (
+              <option value="">No knot prefixes found</option>
+            ) : (
+              knotN1Options.map((n1) => (
+                <option key={n1} value={n1}>
+                  {n1}
+                </option>
+              ))
+            )}
+          </select>
+          <label className="moves_label" htmlFor="knot-index">
+            n2
+          </label>
+          <select
+            id="knot-index"
+            className="moves_input"
+            value={selectedN2}
+            disabled={
+              knotOptionsLoading || knotN1Options.length === 0 || knotN2Options.length === 0
+            }
+            onChange={(event) => setSelectedN2(event.target.value)}
+          >
+            {knotOptionsLoading ? (
+              <option value="">Loading knots...</option>
+            ) : knotN2Options.length === 0 ? (
+              <option value="">No matching n2 values</option>
+            ) : (
+              knotN2Options.map((n2) => (
+                <option key={n2} value={n2}>
+                  {n2}
+                </option>
+              ))
+            )}
+          </select>
+        </div>
+        <p className="moves_hint">
+          Looks up <code>{knotName || 'n1_n2'}</code>
+        </p>
       </div>
     </div>
   )
@@ -164,7 +334,15 @@ function App() {
     <div className="background">
       <div className="container">
         <div className="knot_box">
-          {payloadError ? (
+          {knotOptionsLoading ? (
+            <p className="knot_status">Loading knot options...</p>
+          ) : knotListError ? (
+            <p className="knot_status">{knotListError}</p>
+          ) : !knotName ? (
+            <p className="knot_status">
+              Choose an <code>n1</code> and <code>n2</code> to load a knot.
+            </p>
+          ) : payloadError ? (
             <p className="knot_status">{payloadError}</p>
           ) : svgError ? (
             <p className="knot_status">{svgError}</p>
