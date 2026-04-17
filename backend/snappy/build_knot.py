@@ -1,4 +1,127 @@
+from pathlib import Path
+import json
+import os
+
 from spherogram.links.orthogonal import OrthogonalLinkDiagram
+from supabase import create_client
+
+
+ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
+
+
+def load_backend_env() -> None:
+    if not ENV_PATH.exists():
+        return
+
+    for line in ENV_PATH.read_text().splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+
+        key, value = stripped.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip())
+
+
+def get_supabase():
+    load_backend_env()
+
+    url = os.getenv("SUPABASE_URL")
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+
+    if not url or not key:
+        raise RuntimeError(
+            f"Missing Supabase credentials. Expected SUPABASE_URL and "
+            f"SUPABASE_SERVICE_ROLE_KEY in {ENV_PATH}."
+        )
+
+    return create_client(url, key)
+
+
+def parse_json_value(value):
+    if isinstance(value, str):
+        return json.loads(value)
+
+    return value
+
+
+def normalize_point_pairs(value, field_name):
+    parsed = parse_json_value(value)
+    if parsed is None:
+        return None
+
+    if not isinstance(parsed, list):
+        raise ValueError(f"{field_name} must be a JSON array")
+
+    normalized = []
+    for entry in parsed:
+        if (
+            not isinstance(entry, (list, tuple))
+            or len(entry) != 2
+            or not all(isinstance(item, (int, float)) for item in entry)
+        ):
+            raise ValueError(f"{field_name} must contain 2-item numeric pairs")
+
+        normalized.append((entry[0], entry[1]))
+
+    return normalized
+
+
+def normalize_index_pairs(value, field_name):
+    parsed = parse_json_value(value)
+    if parsed is None:
+        return None
+
+    if not isinstance(parsed, list):
+        raise ValueError(f"{field_name} must be a JSON array")
+
+    normalized = []
+    for entry in parsed:
+        if (
+            not isinstance(entry, (list, tuple))
+            or len(entry) != 2
+            or not all(isinstance(item, (int, float)) for item in entry)
+        ):
+            raise ValueError(f"{field_name} must contain 2-item numeric pairs")
+
+        normalized.append((int(entry[0]), int(entry[1])))
+
+    return normalized
+
+
+def normalize_crossing_specs(value):
+    parsed = parse_json_value(value)
+    if parsed is None:
+        return None
+
+    if not isinstance(parsed, list):
+        raise ValueError("crossing_specs must be a JSON array")
+
+    normalized = []
+    for entry in parsed:
+        if not isinstance(entry, (list, tuple)) or len(entry) != 4:
+            raise ValueError("crossing_specs must contain 4-item entries")
+
+        normalized.append((int(entry[0]), int(entry[1]), entry[2], entry[3]))
+
+    return normalized
+
+
+def fetch_drawing_data(knot_name):
+    supabase = get_supabase()
+
+    for knot_key in ("knot_name", "name"):
+        response = (
+            supabase.table("knot_diagrams_rolf")
+            .select("vertex_positions, arrows, crossing_specs")
+            .eq(knot_key, knot_name)
+            .execute()
+        )
+
+        rows = response.data or []
+        if rows:
+            return rows[0]
+
+    return None
 
 def segment_intersection(start_a, end_a, start_b, end_b):
     ax1,ay1=start_a; ax2,ay2=end_a; bx1,by1=start_b; bx2,by2=end_b
@@ -10,12 +133,26 @@ def segment_intersection(start_a, end_a, start_b, end_b):
 def segment_direction(start,end):
     return "vertical" if start[0]==end[0] else "horizontal"
 
-def build_svg(link, knot_name):
+def build_svg(knot_name):
+    drawing_data = fetch_drawing_data(knot_name)
+    if drawing_data is None:
+        raise ValueError(f"No drawing data for '{knot_name}'")
+
+    vertex_positions = normalize_point_pairs(
+        drawing_data.get("vertex_positions"),
+        "vertex_positions",
+    )
+    arrows = normalize_index_pairs(
+        drawing_data.get("arrows"),
+        "arrows",
+    )
+    crossing_specs = normalize_crossing_specs(drawing_data.get("crossing_specs"))
+
+    if vertex_positions is None or arrows is None or crossing_specs is None:
+        raise ValueError(f"Incomplete drawing data for '{knot_name}'")
+
     W,H=500,500; MARGIN=60; STROKE=10; GAP_STROKE=18; GAP_HALF=18; FONT=13
     INNER_W=W-2*MARGIN; INNER_H=H-2*MARGIN
-
-    diagram = OrthogonalLinkDiagram(link)
-    vertex_positions, arrows, crossing_specs = diagram.plink_data()
 
     xs=[x for x,_ in vertex_positions]; ys=[y for _,y in vertex_positions]
     min_x,max_x=min(xs),max(xs); min_y,max_y=min(ys),max(ys)

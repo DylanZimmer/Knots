@@ -28,8 +28,8 @@ def build_cin_from_oriented_pd(oriented_pd: str | list[list[int]],) -> list[dict
     Slot 0 = a-d line, edges (a, d)
     Slot 1 = b-c line, edges (b, c)
 
-    Positive crossing (+1): slot 0 = Under, slot 1 = Over
-    Negative crossing (-1): slot 0 = Over,  slot 1 = Under
+    Positive crossing (+1): slot 0 = under, slot 1 = over
+    Negative crossing (-1): slot 0 = over,  slot 1 = under
 
     CIN entries store only:
     crossing_id, placement, slot, edges
@@ -38,8 +38,8 @@ def build_cin_from_oriented_pd(oriented_pd: str | list[list[int]],) -> list[dict
 
     cin = []
     for crossing_id, (a, b, c, d, sign) in enumerate(code):
-        slot0_placement = "Under" if sign == 1 else "Over"
-        slot1_placement = "Over" if sign == 1 else "Under"
+        slot0_placement = "under" if sign == 1 else "over"
+        slot1_placement = "over" if sign == 1 else "under"
 
         cin.append(
             {
@@ -83,7 +83,11 @@ def build_oriented_pd_from_cin(cin: str | list[dict]) -> list[list[int]]:
         crossing_id = entry["crossing_id"]
         slot = entry["slot"]
         edges = entry["edges"]
-        placement = entry["placement"]
+        placement_value = entry["placement"]
+        if not isinstance(placement_value, str):
+            raise ValueError(f"Crossing {crossing_id} has an invalid placement")
+
+        placement = placement_value.lower()
 
         if crossing_id not in crossings:
             crossings[crossing_id] = {"slots": {}, "placements": {}}
@@ -104,13 +108,13 @@ def build_oriented_pd_from_cin(cin: str | list[dict]) -> list[list[int]]:
         if 0 not in slots or 1 not in slots:
             raise ValueError(f"Crossing {crossing_id} must contain slots 0 and 1")
 
-        if placements.get(0) == "Under" and placements.get(1) == "Over":
+        if placements.get(0) == "under" and placements.get(1) == "over":
             sign = 1
-        elif placements.get(0) == "Over" and placements.get(1) == "Under":
+        elif placements.get(0) == "over" and placements.get(1) == "under":
             sign = -1
         else:
             raise ValueError(
-                f"Crossing {crossing_id} must use Under/Over placements for slots 0 and 1"
+                f"Crossing {crossing_id} must use under/over placements for slots 0 and 1"
             )
 
         a, d = slots[0]
@@ -121,6 +125,36 @@ def build_oriented_pd_from_cin(cin: str | list[dict]) -> list[list[int]]:
 
 def parse_pd(pd_input):
     return json.loads(pd_input) if isinstance(pd_input, str) else pd_input
+
+def parse_point_pairs(value):
+    parsed = parse_pd(value)
+    if parsed is None:
+        return None
+    return [tuple(point) for point in parsed]
+
+def parse_index_pairs(value):
+    parsed = parse_pd(value)
+    if parsed is None:
+        return None
+    return [(int(pair[0]), int(pair[1])) for pair in parsed]
+
+def parse_crossing_specs(value):
+    parsed = parse_pd(value)
+    if parsed is None:
+        return None
+    return [(int(spec[0]), int(spec[1]), spec[2], spec[3]) for spec in parsed]
+
+def get_geometry_inputs(data):
+    vertex_positions = data.get('vertex_positions')
+    arrows = data.get('arrows')
+    crossing_specs = data.get('crossing_specs')
+    if vertex_positions is None or arrows is None or crossing_specs is None:
+        return None
+
+    parsed_vertex_positions = parse_point_pairs(vertex_positions)
+    parsed_arrows = parse_index_pairs(arrows)
+    parsed_crossing_specs = parse_crossing_specs(crossing_specs)
+    return parsed_vertex_positions, parsed_arrows, parsed_crossing_specs
 
 def oriented_pd_to_pd(oriented_pd: str | list[list[int]]) -> list[list[int]]:
     code = parse_pd(oriented_pd)
@@ -139,16 +173,16 @@ def get_diagram_inputs(data):
 
     pd_notation = data.get('pd_notation')
     if pd_notation:
-        raise ValueError('oriented_pd_notation or ci_notation is required for oriented rendering')
+        raise ValueError('oriented_pd_notation or full_notation is required for oriented rendering')
 
-    ci_notation = data.get('ci_notation')
-    if ci_notation:
-        parsed_ci_notation = parse_cin(ci_notation)
-        oriented_pd_notation = build_oriented_pd_from_cin(parsed_ci_notation)
+    full_notation = data.get('full_notation')
+    if full_notation is not None:
+        parsed_full_notation = parse_cin(full_notation)
+        oriented_pd_notation = build_oriented_pd_from_cin(parsed_full_notation)
         pd_notation = oriented_pd_to_pd(oriented_pd_notation)
-        return parsed_ci_notation, oriented_pd_notation, pd_notation
+        return parsed_full_notation, oriented_pd_notation, pd_notation
 
-    raise ValueError('name, pd_notation, or ci_notation is required')
+    raise ValueError('name, pd_notation, or full_notation is required')
 
 def segment_intersection(start_a, end_a, start_b, end_b):
     ax1,ay1=start_a; ax2,ay2=end_a; bx1,by1=start_b; bx2,by2=end_b
@@ -249,8 +283,7 @@ def build_svg(vertex_positions, arrows, crossing_specs, knot_name):
     lines=[
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
         f'viewBox="0 0 {W} {H}" style="background:#fafafa;font-family:monospace;">',
-        f'<text x="{W//2}" y="22" text-anchor="middle" '
-        f'font-size="16" font-weight="bold" fill="#333">{knot_name}</text>',
+        f'<text x="{W//2}" y="22" text-anchor="middle" font-size="16" font-weight="bold" fill="#333"></text>',
     ]
 
     for si, ei in arrows:
@@ -321,7 +354,7 @@ def index():
 def generate_diagram():
     """
     Expects JSON body:
-      { "name": "3_1", "ci_notation": "[...]" }
+      { "name": "3_1", "full_notation": "[...]" }
 
     Returns SVG as text/svg+xml.
     """
@@ -329,6 +362,12 @@ def generate_diagram():
     knot_name = data.get('name', 'unknown')
 
     try:
+        geometry = get_geometry_inputs(data)
+        if geometry is not None:
+            vertex_positions, arrows, crossing_specs = geometry
+            svg = build_svg(vertex_positions, arrows, crossing_specs, knot_name)
+            return Response(svg, mimetype='image/svg+xml')
+
         _, oriented_pd_code, pd_code = get_diagram_inputs(data)   #Make one of the inputs moves, change below if necessary
         link = Link(pd_code)
         diagram = OrthogonalLinkDiagram(link)
@@ -345,10 +384,10 @@ def debug_diagram():
     knot_name = data.get('name', 'unknown')
 
     try:
-        ci_notation, oriented_pd_notation, pd_notation = get_diagram_inputs(data)
+        full_notation, oriented_pd_notation, pd_notation = get_diagram_inputs(data)
         return jsonify({
             'name': knot_name,
-            'ci_notation': ci_notation,
+            'full_notation': full_notation,
             'oriented_pd_notation': oriented_pd_notation,
             'pd_notation': pd_notation,
         })

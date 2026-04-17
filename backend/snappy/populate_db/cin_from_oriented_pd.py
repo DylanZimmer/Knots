@@ -58,15 +58,15 @@ def build_cin_from_oriented_pd(
     Slot 0 = a-d line, edges (a, d)
     Slot 1 = b-c line, edges (b, c)
 
-    Positive crossing (+1): slot 0 = Under, slot 1 = Over
-    Negative crossing (-1): slot 0 = Over,  slot 1 = Under
+    Positive crossing (+1): slot 0 = under, slot 1 = over
+    Negative crossing (-1): slot 0 = over,  slot 1 = under
     """
     code = parse_pd(oriented_pd) if isinstance(oriented_pd, str) else oriented_pd
 
     cin = []
     for crossing_id, (a, b, c, d, sign) in enumerate(code):
-        slot0_placement = "Under" if sign == 1 else "Over"
-        slot1_placement = "Over" if sign == 1 else "Under"
+        slot0_placement = "under" if sign == 1 else "over"
+        slot1_placement = "over" if sign == 1 else "under"
 
         cin.append(
             {
@@ -101,10 +101,10 @@ def fetch_knots_batch(supabase, start: int) -> list[dict]:
     return result.data or []
 
 
-def update_knot_ci_notation(supabase, knot_id: int, ci_notation: str | None) -> None:
+def update_knot_full_notation(supabase, knot_id: int, full_notation: str | None) -> None:
     (
         supabase.table("knot_diagrams")
-        .update({"ci_notation": ci_notation})
+        .update({"full_notation": full_notation})
         .eq(KNOT_ID_FIELD, knot_id)
         .execute()
     )
@@ -129,7 +129,7 @@ def process_all_knots() -> None:
             oriented_pd_notation = knot.get("oriented_pd_notation")
 
             if not oriented_pd_notation:
-                update_knot_ci_notation(supabase, knot_id, None)
+                update_knot_full_notation(supabase, knot_id, None)
                 skipped += 1
                 print(
                     f"Knot ID {knot_id}: skipped because oriented_pd_notation is missing"
@@ -137,13 +137,13 @@ def process_all_knots() -> None:
                 continue
 
             try:
-                ci_notation = build_cin_from_oriented_pd(oriented_pd_notation)
-                serialized_ci_notation = (
-                    ci_notation if isinstance(ci_notation, str) else json.dumps(ci_notation)
+                full_notation = build_cin_from_oriented_pd(oriented_pd_notation)
+                serialized_full_notation = (
+                    full_notation if isinstance(full_notation, str) else json.dumps(full_notation)
                 )
-                update_knot_ci_notation(supabase, knot_id, serialized_ci_notation)
+                update_knot_full_notation(supabase, knot_id, serialized_full_notation)
                 updated += 1
-                print(f"Knot ID {knot_id}: updated CI notation")
+                print(f"Knot ID {knot_id}: updated full notation")
             except Exception as exc:
                 failed += 1
                 print(f"Knot ID {knot_id}: failed with {type(exc).__name__}: {exc}")
