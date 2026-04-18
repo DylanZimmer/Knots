@@ -2,8 +2,16 @@ import express from 'express'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { statSync, watch, type FSWatcher } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { insertKnot } from './db/fxns'
-import { getSupabase } from './supabase'
+import { createHttpError, type DiagramGeometryPayload, type HttpError, type KnotMovesPayload, parseJsonText, parseJsonValue } from './db/common'
+import {
+  appendFlipOrientationCurrentDiagram,
+  appendMirrorCurrentDiagram,
+  getCurrentDiagramGeometry,
+  getStoredRolfDiagramGeometry,
+  initializeCurrentDiagram,
+} from './db/diagrams'
+import { getCurrentKnotInvariants, getStoredKnotInvariants } from './db/invariants'
+import { getAllKnotNames, getStoredKnotFullNotation, insertKnot } from './db/knots'
 
 const router = express.Router()
 const snappyDirPath = fileURLToPath(new URL('./snappy/', import.meta.url))
@@ -23,61 +31,8 @@ const snappyPythonBin =
   process.env.SNAPPY_PYTHON_BIN ||
   process.env.PYTHON ||
   '/home/dylan/miniforge3/bin/python3'
-type DiagramGeometryPayload = {
-  name: string
-  moves?: string
-  vertex_positions: unknown
-  arrows: unknown
-  crossing_specs: unknown
-}
 
-type KnotMovesPayload = {
-  name: string
-  full_notation: unknown
-}
-
-type KnotOptionRecord = {
-  name: string
-}
-
-type KnotIdRecord = {
-  id: unknown
-}
-
-type KnotInvariantsRecord = {
-  id?: unknown
-  knot_id?: unknown
-  name?: unknown
-  knot_name?: unknown
-  base_name?: unknown
-  alexander_polynomial?: unknown
-  Alexander_polynomial?: unknown
-}
-
-type KnotFullNotationRecord = {
-  name: unknown
-  full_notation: unknown
-}
-
-type CurrentKnotDiagramRecord = {
-  id: unknown
-  base_name: unknown
-  moves: unknown
-  vertex_positions: unknown
-  arrows: unknown
-  crossing_specs: unknown
-}
-
-type CurrentKnotInvariantsRecord = {
-  id: unknown
-  base_name: unknown
-  alexander_polynomial: unknown
-}
-
-type HttpError = Error & { status?: number }
 type CurrentDiagramMoveHandler = () => Promise<DiagramGeometryPayload>
-
-const KNOT_LIST_PAGE_SIZE = 1000
 
 let snappyProcess: ChildProcessWithoutNullStreams | null = null
 let snappyBootPromise: Promise<void> | null = null
@@ -108,62 +63,8 @@ async function isSnappyHealthy() {
   }
 }
 
-function createHttpError(status: number, message: string) {
-  const error = new Error(message) as HttpError
-  error.status = status
-  return error
-}
-
 function normalizeMoveKey(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-}
-
-function parseJsonText(text: string) {
-  if (!text) {
-    return null
-  }
-
-  try {
-    return JSON.parse(text)
-  } catch {
-    return null
-  }
-}
-
-function parseJsonValue(value: unknown) {
-  if (typeof value !== 'string') {
-    return value
-  }
-
-  return parseJsonText(value)
-}
-
-function reverseArrowPairs(arrows: unknown) {
-  if (!Array.isArray(arrows)) {
-    return arrows
-  }
-
-  return arrows.map((arrow) => {
-    if (!Array.isArray(arrow) || arrow.length < 2) {
-      return arrow
-    }
-
-    return [arrow[1], arrow[0], ...arrow.slice(2)]
-  })
-}
-
-function reverseCrossingSpecPairs(crossingSpecs: unknown) {
-  if (!Array.isArray(crossingSpecs)) {
-    return crossingSpecs
-  }
-
-  return crossingSpecs.map((crossingSpec) => {
-    if (!Array.isArray(crossingSpec) || crossingSpec.length < 2) {
-      return crossingSpec
-    }
-
-    return [crossingSpec[1], crossingSpec[0], ...crossingSpec.slice(2)]
-  })
 }
 
 function getRequestBody(req: express.Request) {
@@ -219,358 +120,6 @@ function getErrorMessage(err: unknown, fallback: string) {
   }
 
   return fallback
-}
-
-function parseNumericId(value: unknown, fieldName: string) {
-  const numericValue =
-    typeof value === 'number'
-      ? value
-      : typeof value === 'string'
-        ? Number(value)
-        : Number.NaN
-
-  if (!Number.isFinite(numericValue)) {
-    throw createHttpError(500, `${fieldName} must be numeric`)
-  }
-
-  return numericValue
-}
-
-function normalizeInvariantValue(value: unknown) {
-  if (
-    value == null ||
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
-    return value
-  }
-
-  return JSON.stringify(value)
-}
-
-async function getStoredRolfDiagramGeometry(name: string): Promise<DiagramGeometryPayload> {
-  const supabase = getSupabase()
-
-  const { data: knotRow, error: knotError } = await supabase
-    .from('knots')
-    .select('id')
-    .eq('name', name)
-    .single()
-
-  const knotId = !knotError && knotRow ? (knotRow as KnotIdRecord).id : null
-
-  for (const knotKey of ['id', 'knot_id', 'knot_name', 'name'] as const) {
-    const queryValue = knotKey === 'id' || knotKey === 'knot_id' ? knotId : name
-
-    if (queryValue == null) {
-      continue
-    }
-
-    const { data: diagramRow, error: diagramError } = await supabase
-      .from('knot_diagrams_rolf')
-      .select('vertex_positions, arrows, crossing_specs')
-      .eq(knotKey, queryValue)
-      .single()
-
-    if (!diagramError && diagramRow) {
-      return {
-        name,
-        vertex_positions: parseJsonValue(diagramRow.vertex_positions),
-        arrows: parseJsonValue(diagramRow.arrows),
-        crossing_specs: parseJsonValue(diagramRow.crossing_specs),
-      }
-    }
-  }
-
-  console.error('Rolf diagram data not found for:', name)
-  throw createHttpError(404, `No rolf diagram data for '${name}'`)
-}
-
-async function getCurrentDiagramGeometry(): Promise<DiagramGeometryPayload> {
-  const row = await getLatestCurrentDiagramRow()
-
-  return {
-    name:
-      typeof row.base_name === 'string' && row.base_name.trim().length > 0
-        ? row.base_name
-        : 'current',
-    moves: typeof row.moves === 'string' ? row.moves : '',
-    vertex_positions: parseJsonValue(row.vertex_positions),
-    arrows: parseJsonValue(row.arrows),
-    crossing_specs: parseJsonValue(row.crossing_specs),
-  }
-}
-
-async function getLatestCurrentDiagramRow(): Promise<CurrentKnotDiagramRecord> {
-  const supabase = getSupabase()
-
-  const { data, error } = await supabase
-    .from('current_knot_diagram')
-    .select('id, base_name, moves, vertex_positions, arrows, crossing_specs')
-    .order('id', { ascending: false })
-    .limit(1)
-
-  if (error) {
-    throw error
-  }
-
-  const row = ((data ?? []) as CurrentKnotDiagramRecord[])[0]
-
-  if (!row) {
-    throw createHttpError(404, 'No current knot diagram is available')
-  }
-
-  return row
-}
-
-async function initializeCurrentDiagram(name: string): Promise<DiagramGeometryPayload> {
-  const supabase = getSupabase()
-  const sourceGeometry = await getStoredRolfDiagramGeometry(name)
-
-  const { data: knotRow, error: knotError } = await supabase
-    .from('knots')
-    .select('id')
-    .eq('name', name)
-    .single()
-
-  if (knotError || !knotRow) {
-    console.error('Knot id not found for current diagram seed:', name)
-    throw createHttpError(404, `No knot id for '${name}'`)
-  }
-
-  const { error: clearError } = await supabase
-    .from('current_knot_diagram')
-    .delete()
-    .not('id', 'is', null)
-
-  if (clearError) {
-    throw clearError
-  }
-
-  const { error: insertError } = await supabase.from('current_knot_diagram').insert([
-    {
-      id: (knotRow as KnotIdRecord).id,
-      base_name: name,
-      moves: '',
-      vertex_positions: sourceGeometry.vertex_positions,
-      arrows: sourceGeometry.arrows,
-      crossing_specs: sourceGeometry.crossing_specs,
-    },
-  ])
-
-  if (insertError) {
-    throw insertError
-  }
-
-  await initializeCurrentInvariants(name)
-
-  return getCurrentDiagramGeometry()
-}
-
-async function appendFlipOrientationCurrentDiagram(): Promise<DiagramGeometryPayload> {
-  const supabase = getSupabase()
-  const currentRow = await getLatestCurrentDiagramRow()
-  const currentMoves = typeof currentRow.moves === 'string' ? currentRow.moves.trim() : ''
-  const nextMoves = currentMoves ? `${currentMoves}, flip` : 'flip'
-  const nextId = parseNumericId(currentRow.id, 'current_knot_diagram.id') + 0.1
-
-  const { error: insertError } = await supabase.from('current_knot_diagram').insert([
-    {
-      id: nextId,
-      base_name: currentRow.base_name,
-      moves: nextMoves,
-      vertex_positions: parseJsonValue(currentRow.vertex_positions),
-      arrows: reverseArrowPairs(parseJsonValue(currentRow.arrows)),
-      crossing_specs: parseJsonValue(currentRow.crossing_specs),
-    },
-  ])
-
-  if (insertError) {
-    throw insertError
-  }
-
-  return getCurrentDiagramGeometry()
-}
-
-async function appendMirrorCurrentDiagram(): Promise<DiagramGeometryPayload> {
-  const supabase = getSupabase()
-  const currentRow = await getLatestCurrentDiagramRow()
-  const currentMoves = typeof currentRow.moves === 'string' ? currentRow.moves.trim() : ''
-  const nextMoves = currentMoves ? `${currentMoves}, mirror` : 'mirror'
-  const nextId = parseNumericId(currentRow.id, 'current_knot_diagram.id') + 0.1
-
-  const { error: insertError } = await supabase.from('current_knot_diagram').insert([
-    {
-      id: nextId,
-      base_name: currentRow.base_name,
-      moves: nextMoves,
-      vertex_positions: parseJsonValue(currentRow.vertex_positions),
-      arrows: parseJsonValue(currentRow.arrows),
-      crossing_specs: reverseCrossingSpecPairs(parseJsonValue(currentRow.crossing_specs)),
-    },
-  ])
-
-  if (insertError) {
-    throw insertError
-  }
-
-  return getCurrentDiagramGeometry()
-}
-
-const currentDiagramMoveHandlers: Record<string, CurrentDiagramMoveHandler> = {
-  [normalizeMoveKey('Flip Orientation')]: appendFlipOrientationCurrentDiagram,
-  [normalizeMoveKey('Mirror')]: appendMirrorCurrentDiagram,
-}
-
-async function getStoredKnotInvariants(name: string) {
-  const supabase = getSupabase()
-
-  const { data: knotRow, error: knotError } = await supabase
-    .from('knots')
-    .select('id')
-    .eq('name', name)
-    .single()
-
-  const knotId = !knotError && knotRow ? (knotRow as KnotIdRecord).id : null
-
-  for (const knotKey of ['name', 'knot_name', 'base_name', 'knot_id', 'id'] as const) {
-    const queryValue = knotKey === 'knot_id' || knotKey === 'id' ? knotId : name
-
-    if (queryValue == null) {
-      continue
-    }
-
-    const { data: invariantsRow, error: invariantsError } = await supabase
-      .from('invariants_rolf')
-      .select('*')
-      .eq(knotKey, queryValue)
-      .single()
-
-    if (!invariantsError && invariantsRow) {
-      const {
-        name: storedName,
-        knot_name: knotName,
-        base_name: baseName,
-        alexander_polynomial,
-        Alexander_polynomial,
-      } = invariantsRow as KnotInvariantsRecord
-
-      return {
-        name:
-          typeof baseName === 'string' && baseName.trim().length > 0
-            ? baseName
-            : typeof knotName === 'string' && knotName.trim().length > 0
-              ? knotName
-              : typeof storedName === 'string' && storedName.trim().length > 0
-                ? storedName
-                : name,
-        alexander_polynomial: normalizeInvariantValue(
-          alexander_polynomial ?? Alexander_polynomial,
-        ),
-      }
-    }
-  }
-
-  console.error('Knot invariants not found for:', name)
-  throw createHttpError(404, `No invariants data for '${name}'`)
-}
-
-async function getLatestCurrentInvariantsRow(): Promise<CurrentKnotInvariantsRecord> {
-  const supabase = getSupabase()
-
-  const { data, error } = await supabase
-    .from('current_invariants')
-    .select('id, base_name, alexander_polynomial')
-    .order('id', { ascending: false })
-    .limit(1)
-
-  if (error) {
-    throw error
-  }
-
-  const row = ((data ?? []) as CurrentKnotInvariantsRecord[])[0]
-
-  if (!row) {
-    throw createHttpError(404, 'No current invariants are available')
-  }
-
-  return row
-}
-
-async function getCurrentKnotInvariants() {
-  const row = await getLatestCurrentInvariantsRow()
-
-  return {
-    id: normalizeInvariantValue(row.id),
-    base_name:
-      typeof row.base_name === 'string' && row.base_name.trim().length > 0
-        ? row.base_name
-        : 'current',
-    alexander_polynomial: normalizeInvariantValue(row.alexander_polynomial),
-  }
-}
-
-async function initializeCurrentInvariants(name: string) {
-  const supabase = getSupabase()
-  const sourceInvariants = await getStoredKnotInvariants(name)
-
-  const { data: knotRow, error: knotError } = await supabase
-    .from('knots')
-    .select('id')
-    .eq('name', name)
-    .single()
-
-  if (knotError || !knotRow) {
-    console.error('Knot id not found for current invariants seed:', name)
-    throw createHttpError(404, `No knot id for '${name}'`)
-  }
-
-  const { error: clearError } = await supabase
-    .from('current_invariants')
-    .delete()
-    .not('id', 'is', null)
-
-  if (clearError) {
-    throw clearError
-  }
-
-  const { error: insertError } = await supabase.from('current_invariants').insert([
-    {
-      id: (knotRow as KnotIdRecord).id,
-      base_name: sourceInvariants.name,
-      alexander_polynomial: sourceInvariants.alexander_polynomial,
-    },
-  ])
-
-  if (insertError) {
-    throw insertError
-  }
-}
-
-async function getStoredKnotFullNotation(name: string): Promise<KnotMovesPayload> {
-  const supabase = getSupabase()
-
-  const { data: knotRow, error: knotError } = await supabase
-    .from('knots')
-    .select('name, full_notation')
-    .eq('name', name)
-    .single()
-
-  if (knotError || !knotRow) {
-    console.error('Knot full notation not found for:', name)
-    throw createHttpError(404, `No full notation data for '${name}'`)
-  }
-
-  const { name: storedName, full_notation } = knotRow as KnotFullNotationRecord
-
-  return {
-    name:
-      typeof storedName === 'string' && storedName.trim().length > 0
-        ? storedName
-        : name,
-    full_notation: parseJsonValue(full_notation),
-  }
 }
 
 function getDiagramGeometryPayloadFromRequest(
@@ -640,59 +189,6 @@ async function resolveDiagramRenderPayload(
   return getStoredRolfDiagramGeometry(name)
 }
 
-async function getAllKnotNames(
-  ascending: boolean,
-  paginate: boolean,
-): Promise<string[]> {
-  const supabase = getSupabase()
-
-  if (!paginate) {
-    const { data, error } = await supabase
-      .from('knots')
-      .select('name')
-      .order('name', { ascending })
-
-    if (error) {
-      throw error
-    }
-
-    return (data ?? [])
-      .map((row: KnotOptionRecord) => row.name)
-      .filter((name): name is string => typeof name === 'string' && name.length > 0)
-  }
-
-  const knotNames: string[] = []
-  let start = 0
-
-  while (true) {
-    const { data, error } = await supabase
-      .from('knots')
-      .select('name')
-      .order('name', { ascending })
-      .range(start, start + KNOT_LIST_PAGE_SIZE - 1)
-
-    if (error) {
-      throw error
-    }
-
-    const rows = (data ?? []) as KnotOptionRecord[]
-
-    knotNames.push(
-      ...rows
-        .map((row) => row.name)
-        .filter((name): name is string => typeof name === 'string' && name!== '0_1' && name.length > 0),
-    )
-
-    if (rows.length < KNOT_LIST_PAGE_SIZE) {
-      break
-    }
-
-    start += rows.length
-  }
-
-  return knotNames
-}
-
 function startSnappyProcess() {
   if (snappyProcess && snappyProcess.exitCode === null && !snappyProcess.killed) {
     return
@@ -752,10 +248,7 @@ function startSnappyWatchers() {
     return
   }
 
-  for (const watchPath of [
-    snappyDirPath,
-    snappyPopulateDbDirPath,
-  ]) {
+  for (const watchPath of [snappyDirPath, snappyPopulateDbDirPath]) {
     const watcher = watch(watchPath, (_eventType, filename) => {
       if (typeof filename !== 'string' || !filename.endsWith('.py')) {
         return
@@ -786,7 +279,7 @@ async function ensureSnappyServer() {
     await sleep(150)
   }
 
-  if (snappySourceVersion >= currentSourceVersion && await isSnappyHealthy()) {
+  if (snappySourceVersion >= currentSourceVersion && (await isSnappyHealthy())) {
     return
   }
 
@@ -867,6 +360,11 @@ async function renderDiagramSvg(payload: DiagramGeometryPayload | KnotMovesPaylo
   }
 }
 
+const currentDiagramMoveHandlers: Record<string, CurrentDiagramMoveHandler> = {
+  [normalizeMoveKey('Flip Orientation')]: appendFlipOrientationCurrentDiagram,
+  [normalizeMoveKey('Mirror')]: appendMirrorCurrentDiagram,
+}
+
 startSnappyWatchers()
 
 process.on('exit', shutdownSnappyServer)
@@ -888,9 +386,7 @@ async function handleSvg(req: express.Request, res: express.Response) {
     res.type(contentType).send(body)
   } catch (err) {
     console.error('GET /api/knots/svg failed:', err)
-    res
-      .status(getErrorStatus(err))
-      .send(err instanceof Error ? err.message : 'SVG render failed')
+    res.status(getErrorStatus(err)).send(err instanceof Error ? err.message : 'SVG render failed')
   }
 }
 
@@ -914,9 +410,7 @@ router.post('/debug', handleDebug)
 
 router.get('/', async (_req, res) => {
   try {
-    const knotListAscending = true
-    const knotNames = await getAllKnotNames(knotListAscending, true)
-
+    const knotNames = await getAllKnotNames(true, true)
     res.json(knotNames)
   } catch (err) {
     console.error('GET /api/knots failed:', err)
@@ -1051,6 +545,7 @@ router.get('/:name/diagram', async (req, res) => {
 router.post('/', async (req, res) => {
   const { id, rolf_num, extension } = req.body
   console.log('POST /api/knots body:', req.body)
+
   try {
     const knot = await insertKnot({ id, rolf_num, extension })
     res.json(knot)
@@ -1059,7 +554,8 @@ router.post('/', async (req, res) => {
     const message = err instanceof Error ? err.message : 'Insert failed'
     res.status(500).json({ error: message })
   }
-  console.log("End of routes")
+
+  console.log('End of routes')
 })
 
 export default router

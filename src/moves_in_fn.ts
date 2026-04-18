@@ -105,7 +105,7 @@ export function getTwistLineOptions(_fullNotation: FullNotation): number[] {
 //(NEW) cross_21 : {c_id21, pc, edges: n,m, lines: t,s}
 //(NEW) cross_22 : {c_id22, pd, edges: m,r, lines: s,q}
 //      Below are new additions to f_lines
-//I think I do need to do slot & placement but I don't see how
+//I think I do need to do placement but I don't see how
 //(NEW) cross_0  : {c_id0, p?, s?, edges: }
 
 export function R2_poke(f_lines: FullNotation): FullNotation {

@@ -206,7 +206,7 @@ function App() {
   const [invariantsError, setInvariantsError] = useState<string | null>(null)
   const [knotSvg, setKnotSvg] = useState('')
   const [svgError, setSvgError] = useState<string | null>(null)
-  const [panelMode, setPanelMode] = useState<PanelMode>('invariants')
+  const [panelMode, setPanelMode] = useState<PanelMode>('both')
   const [panelSplit, setPanelSplit] = useState(0.58)
   const [workingFullNotation, setWorkingFullNotation] = useState<moves.FullNotation | null>(null)
   const [moveError, setMoveError] = useState<string | null>(null)
