@@ -3,10 +3,10 @@ import {
   type CurrentKnotDiagramRecord,
   type DiagramGeometryPayload,
   createHttpError,
+  normalizeMovesValue,
   parseJsonValue,
-  parseNumericId,
 } from './common'
-import { initializeCurrentInvariants } from './invariants'
+import { initializeCurrentInvariants, syncCurrentInvariantMoves } from './invariants'
 import { getKnotIdByName, requireKnotIdByName } from './knots'
 
 function reverseArrowPairs(arrows: unknown) {
@@ -43,16 +43,16 @@ export async function getStoredRolfDiagramGeometry(
   const supabase = getSupabase()
   const knotId = await getKnotIdByName(name)
 
-  for (const knotKey of ['id', 'knot_id', 'knot_name', 'name'] as const) {
-    const queryValue = knotKey === 'id' || knotKey === 'knot_id' ? knotId : name
+  for (const knotKey of ['id', 'name'] as const) {
+    const queryValue = knotKey === 'id' ? knotId : name
 
     if (queryValue == null) {
       continue
     }
 
     const { data: diagramRow, error: diagramError } = await supabase
-      .from('knot_diagrams_rolf')
-      .select('vertex_positions, arrows, crossing_specs')
+      .from('diagrams_rolf')
+      .select('name, vertex_positions, arrows, crossing_specs')
       .eq(knotKey, queryValue)
       .single()
 
@@ -74,9 +74,8 @@ export async function getLatestCurrentDiagramRow(): Promise<CurrentKnotDiagramRe
   const supabase = getSupabase()
 
   const { data, error } = await supabase
-    .from('current_knot_diagram')
-    .select('id, base_name, moves, vertex_positions, arrows, crossing_specs')
-    .order('id', { ascending: false })
+    .from('diagrams_current')
+    .select('base_name, moves, vertex_positions, arrows, crossing_specs')
     .limit(1)
 
   if (error) {
@@ -100,41 +99,48 @@ export async function getCurrentDiagramGeometry(): Promise<DiagramGeometryPayloa
       typeof row.base_name === 'string' && row.base_name.trim().length > 0
         ? row.base_name
         : 'current',
-    moves: typeof row.moves === 'string' ? row.moves : '',
+    moves: normalizeMovesValue(row.moves),
     vertex_positions: parseJsonValue(row.vertex_positions),
     arrows: parseJsonValue(row.arrows),
     crossing_specs: parseJsonValue(row.crossing_specs),
   }
 }
 
-export async function initializeCurrentDiagram(name: string): Promise<DiagramGeometryPayload> {
+async function replaceCurrentDiagramRow(payload: DiagramGeometryPayload) {
   const supabase = getSupabase()
-  const sourceGeometry = await getStoredRolfDiagramGeometry(name)
-  const knotId = await requireKnotIdByName(name, 'current diagram seed')
 
   const { error: clearError } = await supabase
-    .from('current_knot_diagram')
+    .from('diagrams_current')
     .delete()
-    .not('id', 'is', null)
+    .not('base_name', 'is', null)
 
   if (clearError) {
     throw clearError
   }
 
-  const { error: insertError } = await supabase.from('current_knot_diagram').insert([
+  const { error: insertError } = await supabase.from('diagrams_current').insert([
     {
-      id: knotId,
-      base_name: name,
-      moves: '',
-      vertex_positions: sourceGeometry.vertex_positions,
-      arrows: sourceGeometry.arrows,
-      crossing_specs: sourceGeometry.crossing_specs,
+      base_name: payload.name,
+      moves: payload.moves ?? [],
+      vertex_positions: payload.vertex_positions,
+      arrows: payload.arrows,
+      crossing_specs: payload.crossing_specs,
     },
   ])
 
   if (insertError) {
     throw insertError
   }
+}
+
+export async function initializeCurrentDiagram(name: string): Promise<DiagramGeometryPayload> {
+  const sourceGeometry = await getStoredRolfDiagramGeometry(name)
+  await requireKnotIdByName(name, 'current diagram seed')
+
+  await replaceCurrentDiagramRow({
+    ...sourceGeometry,
+    moves: [],
+  })
 
   await initializeCurrentInvariants(name)
 
@@ -142,51 +148,33 @@ export async function initializeCurrentDiagram(name: string): Promise<DiagramGeo
 }
 
 export async function appendFlipOrientationCurrentDiagram(): Promise<DiagramGeometryPayload> {
-  const supabase = getSupabase()
   const currentRow = await getLatestCurrentDiagramRow()
-  const currentMoves = typeof currentRow.moves === 'string' ? currentRow.moves.trim() : ''
-  const nextMoves = currentMoves ? `${currentMoves}, flip` : 'flip'
-  const nextId = parseNumericId(currentRow.id, 'current_knot_diagram.id') + 0.1
+  const nextMoves = [...normalizeMovesValue(currentRow.moves), 'flip']
 
-  const { error: insertError } = await supabase.from('current_knot_diagram').insert([
-    {
-      id: nextId,
-      base_name: currentRow.base_name,
-      moves: nextMoves,
-      vertex_positions: parseJsonValue(currentRow.vertex_positions),
-      arrows: reverseArrowPairs(parseJsonValue(currentRow.arrows)),
-      crossing_specs: parseJsonValue(currentRow.crossing_specs),
-    },
-  ])
-
-  if (insertError) {
-    throw insertError
-  }
+  await replaceCurrentDiagramRow({
+    name: typeof currentRow.base_name === 'string' ? currentRow.base_name : 'current',
+    moves: nextMoves,
+    vertex_positions: parseJsonValue(currentRow.vertex_positions),
+    arrows: reverseArrowPairs(parseJsonValue(currentRow.arrows)),
+    crossing_specs: parseJsonValue(currentRow.crossing_specs),
+  })
+  await syncCurrentInvariantMoves(nextMoves)
 
   return getCurrentDiagramGeometry()
 }
 
 export async function appendMirrorCurrentDiagram(): Promise<DiagramGeometryPayload> {
-  const supabase = getSupabase()
   const currentRow = await getLatestCurrentDiagramRow()
-  const currentMoves = typeof currentRow.moves === 'string' ? currentRow.moves.trim() : ''
-  const nextMoves = currentMoves ? `${currentMoves}, mirror` : 'mirror'
-  const nextId = parseNumericId(currentRow.id, 'current_knot_diagram.id') + 0.1
+  const nextMoves = [...normalizeMovesValue(currentRow.moves), 'mirror']
 
-  const { error: insertError } = await supabase.from('current_knot_diagram').insert([
-    {
-      id: nextId,
-      base_name: currentRow.base_name,
-      moves: nextMoves,
-      vertex_positions: parseJsonValue(currentRow.vertex_positions),
-      arrows: parseJsonValue(currentRow.arrows),
-      crossing_specs: reverseCrossingSpecPairs(parseJsonValue(currentRow.crossing_specs)),
-    },
-  ])
-
-  if (insertError) {
-    throw insertError
-  }
+  await replaceCurrentDiagramRow({
+    name: typeof currentRow.base_name === 'string' ? currentRow.base_name : 'current',
+    moves: nextMoves,
+    vertex_positions: parseJsonValue(currentRow.vertex_positions),
+    arrows: parseJsonValue(currentRow.arrows),
+    crossing_specs: reverseCrossingSpecPairs(parseJsonValue(currentRow.crossing_specs)),
+  })
+  await syncCurrentInvariantMoves(nextMoves)
 
   return getCurrentDiagramGeometry()
 }

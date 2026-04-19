@@ -109,9 +109,9 @@ def normalize_crossing_specs(value):
 def fetch_drawing_data(knot_name):
     supabase = get_supabase()
 
-    for knot_key in ("knot_name", "name"):
+    for knot_key in ("name",):
         response = (
-            supabase.table("knot_diagrams_rolf")
+            supabase.table("diagrams_rolf")
             .select("vertex_positions, arrows, crossing_specs")
             .eq(knot_key, knot_name)
             .execute()
@@ -152,6 +152,7 @@ def build_svg(knot_name):
         raise ValueError(f"Incomplete drawing data for '{knot_name}'")
 
     W,H=500,500; MARGIN=60; STROKE=10; GAP_STROKE=18; GAP_HALF=18; FONT=13
+    VERTEX_RADIUS=4; VERTEX_LABEL_DX=12; VERTEX_LABEL_DY=-12
     INNER_W=W-2*MARGIN; INNER_H=H-2*MARGIN
 
     xs=[x for x,_ in vertex_positions]; ys=[y for _,y in vertex_positions]
@@ -185,6 +186,18 @@ def build_svg(knot_name):
         lines.append(
             f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
             f'stroke="#1f4f82" stroke-width="{STROKE}" stroke-linecap="round"/>'
+        )
+
+    for idx, (vx, vy) in enumerate(svg_vertices):
+        lines.append(
+            f'<circle cx="{vx:.1f}" cy="{vy:.1f}" r="{VERTEX_RADIUS}" '
+            f'fill="#fafafa" stroke="#8b1e3f" stroke-width="2"/>'
+        )
+        lines.append(
+            f'<text x="{vx+VERTEX_LABEL_DX:.1f}" y="{vy+VERTEX_LABEL_DY:.1f}" '
+            f'text-anchor="middle" dominant-baseline="central" font-size="{FONT}" '
+            f'font-weight="bold" fill="#8b1e3f" stroke="#fafafa" stroke-width="2" '
+            f'paint-order="stroke">V{idx}</text>'
         )
 
     for under_idx,over_idx,_,label in crossing_specs:

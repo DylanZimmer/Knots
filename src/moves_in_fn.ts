@@ -6,16 +6,16 @@ and edge a is going in, coming out at edge b
 u is the line going in at a, v is the line coming out at b
 */
 
-export type Placement = 'over' | 'under'
+export type Placement = 'over' | 'under';
 
 export interface FullNotationLine {
   crossing_id: number
   placement: Placement | null
   edges: [number, number] // [in, out]
   lines: [number, number]
-}
+};
 
-export type FullNotation = FullNotationLine[]
+export type FullNotation = FullNotationLine[];
 
 export function getMoveRouteKey(moveName: string): string {
   return moveName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')

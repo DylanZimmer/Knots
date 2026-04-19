@@ -11,9 +11,8 @@ import {
 const KNOT_LIST_PAGE_SIZE = 1000
 
 export interface Knot {
-  id: string
-  rolf_num: string
-  extension: string
+  name: string
+  full_notation?: unknown
 }
 
 export async function insertKnot(knot: Knot) {
@@ -24,9 +23,8 @@ export async function insertKnot(knot: Knot) {
     .from('knots')
     .insert([
       {
-        id: knot.id,
-        rolf_num: knot.rolf_num,
-        extension: knot.extension,
+        name: knot.name,
+        full_notation: knot.full_notation ?? null,
       },
     ])
     .select()

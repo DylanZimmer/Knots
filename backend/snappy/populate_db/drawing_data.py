@@ -9,10 +9,10 @@ from supabase import create_client
 
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 BATCH_SIZE = 500
-SOURCE_ID_FIELD = "knot_id"
+SOURCE_ID_FIELD = "id"
 TARGET_ID_FIELD = "id"
-SOURCE_TABLE = "knot_diagrams_old"
-TARGET_TABLE = "knot_diagrams_rolf"
+SOURCE_TABLE = "knots"
+TARGET_TABLE = "diagrams_rolf"
 
 
 def load_backend_env() -> None:
@@ -47,8 +47,60 @@ def parse_pd(pd_input: str | list[list[int]]) -> list[list[int]]:
     return json.loads(pd_input) if isinstance(pd_input, str) else pd_input
 
 
-def build_drawing_data(pd_input: str | list[list[int]]) -> dict:
-    pd_code = parse_pd(pd_input)
+def parse_cin(cin_input):
+    return json.loads(cin_input) if isinstance(cin_input, str) else cin_input
+
+
+def build_oriented_pd_from_cin(cin: str | list[dict]) -> list[list[int]]:
+    cin_entries = parse_cin(cin) if isinstance(cin, str) else cin
+
+    crossings: dict[int, dict] = {}
+    for entry in cin_entries:
+        crossing_id = int(entry["crossing_id"])
+        placement = str(entry["placement"]).lower()
+        edges = entry["edges"]
+        slot = entry.get("slot")
+
+        if slot is None:
+            raise ValueError("full_notation entries must include a slot field")
+
+        if crossing_id not in crossings:
+            crossings[crossing_id] = {"slots": {}, "placements": {}}
+
+        crossings[crossing_id]["slots"][int(slot)] = tuple(edges)
+        crossings[crossing_id]["placements"][int(slot)] = placement
+
+    oriented_pd = []
+    for crossing_id in sorted(crossings):
+        slots = crossings[crossing_id]["slots"]
+        placements = crossings[crossing_id]["placements"]
+
+        if 0 not in slots or 1 not in slots:
+            raise ValueError(f"Crossing {crossing_id} must contain slots 0 and 1")
+
+        if placements.get(0) == "under" and placements.get(1) == "over":
+            sign = 1
+        elif placements.get(0) == "over" and placements.get(1) == "under":
+            sign = -1
+        else:
+            raise ValueError(
+                f"Crossing {crossing_id} must use under/over placements for slots 0 and 1"
+            )
+
+        a, d = slots[0]
+        b, c = slots[1]
+        oriented_pd.append([a, b, c, d, sign])
+
+    return oriented_pd
+
+
+def build_pd_from_cin(cin: str | list[dict]) -> list[list[int]]:
+    oriented_pd = build_oriented_pd_from_cin(cin)
+    return [crossing[:4] for crossing in oriented_pd]
+
+
+def build_drawing_data(full_notation: str | list[dict]) -> dict:
+    pd_code = build_pd_from_cin(full_notation)
     link = Link(pd_code)
     diagram = OrthogonalLinkDiagram(link)
     vertex_positions, arrows, crossing_specs = diagram.plink_data()
@@ -63,7 +115,7 @@ def build_drawing_data(pd_input: str | list[list[int]]) -> dict:
 def fetch_knots_batch(supabase, start: int) -> list[dict]:
     result = (
         supabase.table(SOURCE_TABLE)
-        .select(f"{SOURCE_ID_FIELD},pd_notation")
+        .select(f"{SOURCE_ID_FIELD},name,full_notation")
         .order(SOURCE_ID_FIELD)
         .range(start, start + BATCH_SIZE - 1)
         .execute()
@@ -74,6 +126,7 @@ def fetch_knots_batch(supabase, start: int) -> list[dict]:
 def update_knot_drawing_data(
     supabase,
     knot_id: int | str,
+    knot_name: str | None,
     vertex_positions,
     arrows,
     crossing_specs,
@@ -83,6 +136,7 @@ def update_knot_drawing_data(
         .upsert(
             {
                 TARGET_ID_FIELD: knot_id,
+                "name": knot_name,
                 "vertex_positions": vertex_positions,
                 "arrows": arrows,
                 "crossing_specs": crossing_specs,
@@ -109,19 +163,21 @@ def process_all_knots() -> None:
         for knot in knots:
             processed += 1
             knot_id = knot[SOURCE_ID_FIELD]
-            pd_notation = knot.get("pd_notation")
+            knot_name = knot.get("name")
+            full_notation = knot.get("full_notation")
 
-            if not pd_notation:
-                update_knot_drawing_data(supabase, knot_id, None, None, None)
+            if not full_notation:
+                update_knot_drawing_data(supabase, knot_id, knot_name, None, None, None)
                 skipped += 1
-                print(f"Knot ID {knot_id}: skipped because pd_notation is missing")
+                print(f"Knot ID {knot_id}: skipped because full_notation is missing")
                 continue
 
             try:
-                drawing_data = build_drawing_data(pd_notation)
+                drawing_data = build_drawing_data(full_notation)
                 update_knot_drawing_data(
                     supabase,
                     knot_id,
+                    knot_name,
                     drawing_data["vertex_positions"],
                     drawing_data["arrows"],
                     drawing_data["crossing_specs"],

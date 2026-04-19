@@ -1,6 +1,6 @@
 export type DiagramGeometryPayload = {
   name: string
-  moves?: string
+  moves?: string[]
   vertex_positions: unknown
   arrows: unknown
   crossing_specs: unknown
@@ -21,12 +21,10 @@ export type KnotIdRecord = {
 
 export type KnotInvariantsRecord = {
   id?: unknown
-  knot_id?: unknown
   name?: unknown
-  knot_name?: unknown
-  base_name?: unknown
+  determinant?: unknown
   alexander_polynomial?: unknown
-  Alexander_polynomial?: unknown
+  jones_polynomial?: unknown
 }
 
 export type KnotFullNotationRecord = {
@@ -35,7 +33,6 @@ export type KnotFullNotationRecord = {
 }
 
 export type CurrentKnotDiagramRecord = {
-  id: unknown
   base_name: unknown
   moves: unknown
   vertex_positions: unknown
@@ -44,9 +41,11 @@ export type CurrentKnotDiagramRecord = {
 }
 
 export type CurrentKnotInvariantsRecord = {
-  id: unknown
   base_name: unknown
+  moves: unknown
+  determinant: unknown
   alexander_polynomial: unknown
+  jones_polynomial: unknown
 }
 
 export type HttpError = Error & { status?: number }
@@ -103,4 +102,22 @@ export function normalizeInvariantValue(value: unknown) {
   }
 
   return JSON.stringify(value)
+}
+
+export function normalizeMovesValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return value
+      .filter((move): move is string => typeof move === 'string')
+      .map((move) => move.trim())
+      .filter(Boolean)
+  }
+
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map((move) => move.trim())
+      .filter(Boolean)
+  }
+
+  return []
 }

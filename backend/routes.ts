@@ -543,11 +543,16 @@ router.get('/:name/diagram', async (req, res) => {
 })
 
 router.post('/', async (req, res) => {
-  const { id, rolf_num, extension } = req.body
+  const { name, full_notation } = req.body
   console.log('POST /api/knots body:', req.body)
 
+  if (typeof name !== 'string' || name.trim().length === 0) {
+    res.status(400).json({ error: 'A knot name is required' })
+    return
+  }
+
   try {
-    const knot = await insertKnot({ id, rolf_num, extension })
+    const knot = await insertKnot({ name: name.trim(), full_notation })
     res.json(knot)
   } catch (err) {
     console.error('POST /api/knots failed:', err)

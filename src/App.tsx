@@ -4,7 +4,7 @@ import * as moves from './moves_in_fn';
 
 type KnotGeometryPayload = {
   name: string
-  moves?: string
+  moves?: string[]
   vertex_positions: unknown
   arrows: unknown
   crossing_specs: unknown
@@ -257,8 +257,14 @@ function App() {
       return payloadError ? 'Unavailable' : 'Loading...'
     }
 
-    const currentMoves = typeof diagramPayload.moves === 'string' ? diagramPayload.moves.trim() : ''
-    return currentMoves || 'none'
+    const currentMoves = Array.isArray(diagramPayload.moves)
+      ? diagramPayload.moves
+          .filter((move): move is string => typeof move === 'string')
+          .map((move) => move.trim())
+          .filter(Boolean)
+      : []
+
+    return currentMoves.length > 0 ? currentMoves.join(', ') : 'none'
   }, [diagramPayload, payloadError])
 
   const renderPayload = useMemo(() => diagramPayload, [diagramPayload])

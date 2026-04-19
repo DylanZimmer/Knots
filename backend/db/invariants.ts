@@ -11,8 +11,8 @@ export async function getStoredKnotInvariants(name: string) {
   const supabase = getSupabase()
   const knotId = await getKnotIdByName(name)
 
-  for (const knotKey of ['name', 'knot_name', 'base_name', 'knot_id', 'id'] as const) {
-    const queryValue = knotKey === 'knot_id' || knotKey === 'id' ? knotId : name
+  for (const knotKey of ['id', 'name'] as const) {
+    const queryValue = knotKey === 'id' ? knotId : name
 
     if (queryValue == null) {
       continue
@@ -20,31 +20,26 @@ export async function getStoredKnotInvariants(name: string) {
 
     const { data: invariantsRow, error: invariantsError } = await supabase
       .from('invariants_rolf')
-      .select('*')
+      .select('id, name, determinant, alexander_polynomial, jones_polynomial')
       .eq(knotKey, queryValue)
       .single()
 
     if (!invariantsError && invariantsRow) {
       const {
         name: storedName,
-        knot_name: knotName,
-        base_name: baseName,
+        determinant,
         alexander_polynomial,
-        Alexander_polynomial,
+        jones_polynomial,
       } = invariantsRow as KnotInvariantsRecord
 
       return {
         name:
-          typeof baseName === 'string' && baseName.trim().length > 0
-            ? baseName
-            : typeof knotName === 'string' && knotName.trim().length > 0
-              ? knotName
-              : typeof storedName === 'string' && storedName.trim().length > 0
-                ? storedName
-                : name,
-        alexander_polynomial: normalizeInvariantValue(
-          alexander_polynomial ?? Alexander_polynomial,
-        ),
+          typeof storedName === 'string' && storedName.trim().length > 0
+            ? storedName
+            : name,
+        determinant: normalizeInvariantValue(determinant),
+        alexander_polynomial: normalizeInvariantValue(alexander_polynomial),
+        jones_polynomial: normalizeInvariantValue(jones_polynomial),
       }
     }
   }
@@ -57,9 +52,8 @@ export async function getLatestCurrentInvariantsRow(): Promise<CurrentKnotInvari
   const supabase = getSupabase()
 
   const { data, error } = await supabase
-    .from('current_invariants')
-    .select('id, base_name, alexander_polynomial')
-    .order('id', { ascending: false })
+    .from('invariants_current')
+    .select('base_name, moves, determinant, alexander_polynomial, jones_polynomial')
     .limit(1)
 
   if (error) {
@@ -79,38 +73,54 @@ export async function getCurrentKnotInvariants() {
   const row = await getLatestCurrentInvariantsRow()
 
   return {
-    id: normalizeInvariantValue(row.id),
     base_name:
       typeof row.base_name === 'string' && row.base_name.trim().length > 0
         ? row.base_name
         : 'current',
+    determinant: normalizeInvariantValue(row.determinant),
     alexander_polynomial: normalizeInvariantValue(row.alexander_polynomial),
+    jones_polynomial: normalizeInvariantValue(row.jones_polynomial),
   }
 }
 
 export async function initializeCurrentInvariants(name: string) {
   const supabase = getSupabase()
   const sourceInvariants = await getStoredKnotInvariants(name)
-  const knotId = await requireKnotIdByName(name, 'current invariants seed')
+  await requireKnotIdByName(name, 'current invariants seed')
 
   const { error: clearError } = await supabase
-    .from('current_invariants')
+    .from('invariants_current')
     .delete()
-    .not('id', 'is', null)
+    .not('base_name', 'is', null)
 
   if (clearError) {
     throw clearError
   }
 
-  const { error: insertError } = await supabase.from('current_invariants').insert([
+  const { error: insertError } = await supabase.from('invariants_current').insert([
     {
-      id: knotId,
       base_name: sourceInvariants.name,
+      moves: [],
+      determinant: sourceInvariants.determinant,
       alexander_polynomial: sourceInvariants.alexander_polynomial,
+      jones_polynomial: sourceInvariants.jones_polynomial,
     },
   ])
 
   if (insertError) {
     throw insertError
+  }
+}
+
+export async function syncCurrentInvariantMoves(moves: string[]) {
+  const supabase = getSupabase()
+
+  const { error } = await supabase
+    .from('invariants_current')
+    .update({ moves })
+    .not('base_name', 'is', null)
+
+  if (error) {
+    throw error
   }
 }
