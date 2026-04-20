@@ -7,7 +7,7 @@ import json
 app = Flask(__name__)
 CORS(app)
 
-type Point = tuple[float, float]
+Point = tuple[float, float]
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
