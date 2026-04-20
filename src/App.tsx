@@ -1,5 +1,6 @@
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import './App.css';
+import { getApiUrl } from './api';
 import * as moves from './moves_in_fn';
 
 type KnotGeometryPayload = {
@@ -283,7 +284,7 @@ function App() {
 
     async function loadKnotNames() {
       try {
-        const res = await fetch('/api/knots')
+        const res = await fetch(getApiUrl('/api/knots'))
         const payload = await readJsonResponse(res)
 
         if (!res.ok) {
@@ -395,7 +396,7 @@ function App() {
       let diagramInitialized = false
 
       try {
-        const res = await fetch('/api/knots/current', {
+        const res = await fetch(getApiUrl('/api/knots/current'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: knotName }),
@@ -413,7 +414,7 @@ function App() {
 
         diagramInitialized = true
 
-        const invariantsRes = await fetch('/api/knots/current/invariants')
+        const invariantsRes = await fetch(getApiUrl('/api/knots/current/invariants'))
         const invariantsPayload = await readJsonResponse(invariantsRes)
 
         if (!invariantsRes.ok) {
@@ -457,7 +458,7 @@ function App() {
 
     async function loadMovesPayload() {
       try {
-        const res = await fetch(`/api/knots/${knotName}/full-notation`)
+        const res = await fetch(getApiUrl(`/api/knots/${knotName}/full-notation`))
         const payload = await readJsonResponse(res)
 
         if (!res.ok) {
@@ -570,7 +571,7 @@ function App() {
 
     async function loadKnotVisuals() {
       try {
-        const svgRes = await fetch('/api/knots/svg', {
+        const svgRes = await fetch(getApiUrl('/api/knots/svg'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(renderPayload),
@@ -683,7 +684,7 @@ function App() {
 
     try {
       const routeKey = moves.getMoveRouteKey(moveName)
-      const res = await fetch(`/api/knots/current/${encodeURIComponent(routeKey)}`, {
+      const res = await fetch(getApiUrl(`/api/knots/current/${encodeURIComponent(routeKey)}`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       })
