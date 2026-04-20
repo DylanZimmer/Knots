@@ -30,7 +30,7 @@ const snappyBaseUrl = 'http://127.0.0.1:5000'
 const snappyPythonBin =
   process.env.SNAPPY_PYTHON_BIN ||
   process.env.PYTHON ||
-  '/home/dylan/miniforge3/bin/python3'
+  'python3'
 
 type CurrentDiagramMoveHandler = () => Promise<DiagramGeometryPayload>
 

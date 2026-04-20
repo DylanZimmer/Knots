@@ -2,7 +2,8 @@ import express from 'express'
 import router from './routes'
 
 const app = express()
-const port = 3001
+const port = Number(process.env.PORT) || 3001
+const host = '0.0.0.0'
 const allowedOrigins = new Set(
   (process.env.CORS_ALLOWED_ORIGINS ||
     'http://localhost:5173,https://knotresearch.netlify.app')
@@ -33,8 +34,11 @@ app.use((req, res, next) => {
 })
 
 app.use(express.json())
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok' })
+})
 app.use('/api/knots', router)
 
-app.listen(port, () => {
-  console.log(`Backend listening on http://localhost:${port}`)
+app.listen(port, host, () => {
+  console.log(`Backend listening on http://${host}:${port}`)
 })

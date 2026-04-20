@@ -1,0 +1,17 @@
+.git
+.gitignore
+.codex
+node_modules
+dist
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+.venv
+.venv-snappy
+__pycache__
+*.pyc
+*.pyo
+*.tsbuildinfo
