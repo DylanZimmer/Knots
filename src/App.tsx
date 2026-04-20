@@ -30,6 +30,7 @@ type KnotParts = {
 const MIN_PANEL_SPLIT = 0.25
 const MAX_PANEL_SPLIT = 0.75
 const PANEL_SPLIT_KEYBOARD_STEP = 0.05
+const HIDDEN_INVARIANT_KEYS = new Set<InvariantKey>(['base_name'])
 
 function clampPanelSplit(value: number) {
   return Math.min(MAX_PANEL_SPLIT, Math.max(MIN_PANEL_SPLIT, value))
@@ -269,7 +270,10 @@ function App() {
 
   const renderPayload = useMemo(() => diagramPayload, [diagramPayload])
   const availableInvariantKeys = useMemo(
-    () => (invariantsPayload ? Object.keys(invariantsPayload) : []),
+    () =>
+      invariantsPayload
+        ? Object.keys(invariantsPayload).filter((key) => !HIDDEN_INVARIANT_KEYS.has(key))
+        : [],
     [invariantsPayload],
   )
 
@@ -757,7 +761,9 @@ function App() {
               <div
                 key={key}
                 className={`invariant_row ${
-                  key === 'alexander_polynomial' ? 'invariant_row--stacked' : ''
+                  key === 'alexander_polynomial' || key === 'jones_polynomial'
+                    ? 'invariant_row--stacked'
+                    : ''
                 }`}
               >
                 <dt className="invariant_label">{formatInvariantLabel(key)}</dt>
@@ -938,9 +944,7 @@ function App() {
                 }`}
                 onPointerDown={handlePanelDividerPointerDown}
                 onKeyDown={handlePanelDividerKeyDown}
-              >
-                <span className="panel_divider_label">drag to resize</span>
-              </div>
+              />
               <div
                 className="invariants_box panel_box panel_box--bottom"
                 style={{ flex: 1 - panelSplit }}

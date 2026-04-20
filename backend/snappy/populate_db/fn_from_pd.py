@@ -5,13 +5,19 @@ import json
 import os
 
 import spherogram
+from postgrest.exceptions import APIError
 from supabase import create_client
 
 
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 BATCH_SIZE = 500
-KNOT_DIAGRAM_ID_FIELD = "knot_id"
-KNOT_ROW_ID_FIELD = "id"
+SOURCE_SCHEMA = "archive"
+SOURCE_TABLE = "knot_diagrams_old"
+SOURCE_ID_FIELD = "knot_id"
+SOURCE_PD_FIELD = "pd_notation"
+TARGET_SCHEMA = "archive"
+TARGET_TABLE = "knots"
+TARGET_ID_FIELD = "id"
 
 
 @dataclass(frozen=True)
@@ -40,7 +46,7 @@ def load_backend_env() -> None:
             continue
 
         key, value = stripped.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip())
+        os.environ[key.strip()] = value.strip().strip("'\"")
 
 
 def get_supabase():
@@ -56,6 +62,30 @@ def get_supabase():
         )
 
     return create_client(url, key)
+
+
+def get_table(supabase, schema_name: str | None, table_name: str):
+    if schema_name:
+        return supabase.schema(schema_name).table(table_name)
+    return supabase.table(table_name)
+
+
+def wrap_schema_api_error(exc: APIError, *, action: str, schema_name: str | None, table_name: str):
+    schema_label = schema_name or "public"
+    details = getattr(exc, "message", None) or str(exc)
+
+    if getattr(exc, "code", None) == "42501":
+        raise RuntimeError(
+            "Supabase rejected the request while trying to "
+            f"{action} `{schema_label}.{table_name}`: {details}\n"
+            "This is usually a database configuration issue, not a PD parsing problem.\n"
+            f"Check that the key in {ENV_PATH} is a secret/service key and that the "
+            f"`{schema_label}` schema is exposed to the API and granted to the role behind that key."
+        ) from exc
+
+    raise RuntimeError(
+        f"Supabase request failed while trying to {action} `{schema_label}.{table_name}`: {details}"
+    ) from exc
 
 
 def parse_pd(pd_input: str | list[list[int]]) -> list[list[int]]:
@@ -87,27 +117,21 @@ def normalize_pd_code(pd_input: str | list[list[int]]) -> list[list[int]]:
 
 def find_line_num_for_in_edge(pd, e):
     for pd_e in pd:
-        if pd_e[1] == e:
-            return pd_e[3]
-        if pd_e[2] == e:
-            return pd_e[0]
-
+        if pd_e[3] == e:
+            return pd_e[1]
+        if pd_e[0] == e:
+            return pd_e[2]
+    return e
 
 def pd_to_full_notation(pd_input: str | list[list[int]]) -> list[dict]:
-
-    pd_code = normalize_pd_code(pd_input)
-
-    # Step 1: subtract 1 from every entry
-    pd = [[x - 1 for x in crossing] for crossing in pd_code]
-
-    n = len(pd)
-    next_label = n  # original labels are 0..2n-1, new ones start here
+    normalized_pd_code = normalize_pd_code(pd_input)
+    pd_code = [[edge - 1 for edge in crossing] for crossing in normalized_pd_code]
 
     counts = defaultdict(int)
-    next_label = max(max(crossing) for crossing in pd_code)
+    next_label = 2 * len(pd_code)
     
     mod_pd = []
-    
+
     for crossing in pd_code:
         new_crossing = []
         for x in crossing:
@@ -147,23 +171,39 @@ def pd_to_full_notation(pd_input: str | list[list[int]]) -> list[dict]:
 
 
 def fetch_knots_batch(supabase, start: int) -> list[dict]:
-    result = (
-        supabase.table("knot_diagrams")
-        .select(f"{KNOT_DIAGRAM_ID_FIELD},pd_notation")
-        .order(KNOT_DIAGRAM_ID_FIELD)
-        .range(start, start + BATCH_SIZE - 1)
-        .execute()
-    )
+    try:
+        result = (
+            get_table(supabase, SOURCE_SCHEMA, SOURCE_TABLE)
+            .select(f"{SOURCE_ID_FIELD},{SOURCE_PD_FIELD}")
+            .order(SOURCE_ID_FIELD)
+            .range(start, start + BATCH_SIZE - 1)
+            .execute()
+        )
+    except APIError as exc:
+        wrap_schema_api_error(
+            exc,
+            action="read from",
+            schema_name=SOURCE_SCHEMA,
+            table_name=SOURCE_TABLE,
+        )
     return result.data or []
 
 
 def update_knot_full_notation(supabase, knot_id: int | str, full_notation: str | None) -> None:
-    (
-        supabase.table("knots")
-        .update({"full_notation": full_notation})
-        .eq(KNOT_ROW_ID_FIELD, knot_id)
-        .execute()
-    )
+    try:
+        (
+            get_table(supabase, TARGET_SCHEMA, TARGET_TABLE)
+            .update({"full_notation": full_notation})
+            .eq(TARGET_ID_FIELD, knot_id)
+            .execute()
+        )
+    except APIError as exc:
+        wrap_schema_api_error(
+            exc,
+            action="update",
+            schema_name=TARGET_SCHEMA,
+            table_name=TARGET_TABLE,
+        )
 
 
 def process_all_knots() -> None:
@@ -181,17 +221,17 @@ def process_all_knots() -> None:
 
         for knot in knots:
             processed += 1
-            knot_id = knot[KNOT_DIAGRAM_ID_FIELD]
-            pd_notation = knot.get("pd_notation")
+            knot_id = knot[SOURCE_ID_FIELD]
+            pd_code = knot.get(SOURCE_PD_FIELD)
 
-            if not pd_notation:
+            if not pd_code:
                 update_knot_full_notation(supabase, knot_id, None)
                 skipped += 1
-                print(f"Knot ID {knot_id}: skipped because pd_notation is missing")
+                print(f"Knot ID {knot_id}: skipped because {SOURCE_PD_FIELD} is missing")
                 continue
 
             try:
-                full_notation = pd_to_full_notation(pd_notation)
+                full_notation = pd_to_full_notation(pd_code)
                 serialized_full_notation = json.dumps(full_notation)
                 update_knot_full_notation(supabase, knot_id, serialized_full_notation)
                 updated += 1
