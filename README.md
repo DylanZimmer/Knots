@@ -2,7 +2,7 @@ Hosted at knotresearch.netlify.app.
 
 A research tool for exploring knots as mathematical objects. Generate oriented diagrams of any Rolfsen table knot up to 13 crossings, apply combinatorial and topological moves, and track how knot invariants change across sequences of transformations.
 
-is a full-stack research application built for knot theorists who want to experiment with knot diagrams programmatically. It bridges a React/TypeScript frontend with a Python backend powered by SageMath and SnapPy, exposing a clean interface for diagram manipulation and invariant computation.
+This is a full-stack research application built for knot theorists who want to experiment with knot diagrams programmatically. It bridges a React/TypeScript frontend with a Python backend powered by SageMath and SnapPy, exposing a clean interface for diagram manipulation and invariant computation.
 
 The core idea is to make it easy to ask and answer questions of the form :
   If I apply this set of moves on this knot or set of knots, what will happen to their invariants?
