@@ -1,6 +1,6 @@
 import express from 'express'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { statSync, watch, type FSWatcher } from 'node:fs'
+import { existsSync, statSync, watch, type FSWatcher } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { createHttpError, type DiagramGeometryPayload, type HttpError, type KnotMovesPayload, parseJsonText, parseJsonValue } from './db/common'
 import {
@@ -18,7 +18,7 @@ const snappyDirPath = fileURLToPath(new URL('./snappy/', import.meta.url))
 const snappyPopulateDbDirPath = fileURLToPath(
   new URL('./snappy/populate_db/', import.meta.url),
 )
-const snappyAppPath = fileURLToPath(new URL('./snappy/app.py', import.meta.url))
+const snappyAppPath = fileURLToPath(new URL('./snappy/draw_from_db.py', import.meta.url))
 const snappyServePath = fileURLToPath(new URL('./snappy/serve.py', import.meta.url))
 const snappyPopulateDbCinPath = fileURLToPath(
   new URL('./snappy/populate_db/cin_from_oriented_pd.py', import.meta.url),
@@ -27,9 +27,20 @@ const snappyPopulateDbOrientedPath = fileURLToPath(
   new URL('./snappy/populate_db/oriented_pd.py', import.meta.url),
 )
 const snappyBaseUrl = 'http://127.0.0.1:5000'
+const localSnappyPythonBin = fileURLToPath(
+  new URL('../.venv-snappy/bin/python', import.meta.url),
+)
+const localSnappyPythonBinWindows = fileURLToPath(
+  new URL('../.venv-snappy/Scripts/python.exe', import.meta.url),
+)
 const snappyPythonBin =
   process.env.SNAPPY_PYTHON_BIN ||
   process.env.PYTHON ||
+  (existsSync(localSnappyPythonBin)
+    ? localSnappyPythonBin
+    : existsSync(localSnappyPythonBinWindows)
+      ? localSnappyPythonBinWindows
+      : null) ||
   'python3'
 
 type CurrentDiagramMoveHandler = () => Promise<DiagramGeometryPayload>
@@ -267,19 +278,20 @@ function startSnappyWatchers() {
 
 async function ensureSnappyServer() {
   const currentSourceVersion = getSnappySourceVersion()
+  const snappyHealthy = await isSnappyHealthy()
 
-  if (
-    snappyProcess &&
-    snappyProcess.exitCode === null &&
-    !snappyProcess.killed &&
-    snappySourceVersion < currentSourceVersion
-  ) {
+  if (!snappyProcess && snappyHealthy) {
+    snappySourceVersion = currentSourceVersion
+    return
+  }
+
+  if (snappyProcess && snappyProcess.exitCode === null && !snappyProcess.killed && snappySourceVersion < currentSourceVersion) {
     console.log('Restarting snappy to pick up Python changes')
     shutdownSnappyServer()
     await sleep(150)
   }
 
-  if (snappySourceVersion >= currentSourceVersion && (await isSnappyHealthy())) {
+  if (snappySourceVersion >= currentSourceVersion && (snappyHealthy || (await isSnappyHealthy()))) {
     return
   }
 
@@ -366,6 +378,12 @@ const currentDiagramMoveHandlers: Record<string, CurrentDiagramMoveHandler> = {
 }
 
 startSnappyWatchers()
+void ensureSnappyServer().catch((err) => {
+  console.error(`Failed to start snappy with ${snappyPythonBin}:`, err)
+  shutdownSnappyWatchers()
+  shutdownSnappyServer()
+  process.exit(1)
+})
 
 process.on('exit', shutdownSnappyServer)
 process.on('SIGINT', () => {

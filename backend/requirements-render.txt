@@ -4,3 +4,4 @@ postgrest==2.28.3
 snappy==3.3.2
 spherogram==2.4.1
 supabase==2.28.3
+waitress>=3.0,<4

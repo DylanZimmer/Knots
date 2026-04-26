@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import './App.css';
 import { getApiUrl } from './api';
 import * as moves from './moves_in_fn';
+import type { FullNotation } from '../shared/types'
 
 type KnotGeometryPayload = {
   name: string
@@ -13,7 +14,7 @@ type KnotGeometryPayload = {
 
 type KnotMovesPayload = {
   name: string
-  full_notation: moves.FullNotation | null
+  full_notation: FullNotation | null
 }
 
 type InvariantValue = string | number | boolean | null
@@ -70,7 +71,7 @@ function formatInvariantLabel(key: string) {
     .join(' ')
 }
 
-type MoveFunction = (fullNotation: moves.FullNotation) => moves.FullNotation
+type MoveFunction = (fullNotation: FullNotation) => FullNotation
 
 async function readJsonResponse(res: Response) {
   const text = await res.text()
@@ -94,11 +95,10 @@ async function readJsonResponse(res: Response) {
   }
 }
 
-function cloneFullNotation(fullNotation: moves.FullNotation): moves.FullNotation {
+function cloneFullNotation(fullNotation: FullNotation): FullNotation {
   return fullNotation.map((line) => ({
     ...line,
-    edges: [...line.edges] as [number, number],
-    lines: [...line.lines] as [number, number],
+    arcs: [...line.arcs] as [number, number],
   }))
 }
 
@@ -210,7 +210,7 @@ function App() {
   const [svgError, setSvgError] = useState<string | null>(null)
   const [panelMode, setPanelMode] = useState<PanelMode>('both')
   const [panelSplit, setPanelSplit] = useState(0.58)
-  const [workingFullNotation, setWorkingFullNotation] = useState<moves.FullNotation | null>(null)
+  const [workingFullNotation, setWorkingFullNotation] = useState<FullNotation | null>(null)
   const [moveError, setMoveError] = useState<string | null>(null)
   const [shownInvariantKeys, setShownInvariantKeys] = useState<InvariantKey[]>([])
   const [isEditingInvariants, setIsEditingInvariants] = useState(false)

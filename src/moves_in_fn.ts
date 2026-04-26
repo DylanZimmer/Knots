@@ -1,3 +1,5 @@
+import type { FullNotation, FullNotationEntry, Geometry } from './types.ts';
+
 /*
 Full Notation:
 
@@ -6,16 +8,10 @@ and edge a is going in, coming out at edge b
 u is the line going in at a, v is the line coming out at b
 */
 
-export type Placement = 'over' | 'under';
-
-export interface FullNotationLine {
-  crossing_id: number
-  placement: Placement | null
-  edges: [number, number] // [in, out]
-  lines: [number, number]
+const addOffset = (x: number, offset: number, precision = 3) => {
+  return Number((x + offset).toFixed(precision));
 };
 
-export type FullNotation = FullNotationLine[];
 
 export function getMoveRouteKey(moveName: string): string {
   return moveName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
@@ -23,14 +19,13 @@ export function getMoveRouteKey(moveName: string): string {
 
 export function flipOrientation(fullNotation: FullNotation): FullNotation {
   return fullNotation.map((line) => ({
-    ...line, edges: [line.edges[1], line.edges[0]],
+    ...line, arcs: [line.arcs[1], line.arcs[0]],
   }))
 }
 
 export function mirror(fullNotation: FullNotation): FullNotation {
   return fullNotation.map((line) => ({
-    ...line, placement: line.placement == null? null 
-      : line.placement === 'over' ? 'under' : 'over',
+    ...line, placement: line.placement === 'over' ? 'under' : 'over',
   }))
 }
 
@@ -54,38 +49,41 @@ export const movesNoArgument: Record<string, (fullNotation: FullNotation) => Ful
     //edges need to be new. Naming them as such allows me to not change existing edges
     //Label the self-loop of the twist by its twistNum, maybe like 'ttwistNum'
 
-export function R1_twist(line_in: FullNotationLine, line_out: FullNotationLine,twistNum: number): FullNotation {
-    //A twist will add one line to f_lines, one in one out
-    //crossing id : line_x ; x is num twists in that line
-    // { c_id, placement: null, slot: null, edges: a,b, lines: u,v }
-    /*
-             --
-            /  \
-            \  /
-             \/
-             /\
-            a  b > --- v
-            b  a < --- u
-    */
-    //The twist is in the line coming out of the FLine line
-    //There will be on more line to f_lines, and also
-        //need to change the edges of both lines containing
-    //twistNum is for naming
-    const tNum = twistNum * .1;
-    const tN1 = (tNum * 2) + .1;
-    const tN2 = (tNum * 2) + .2;
-    const new_inline  = Math.floor(line_in.lines[1]) + tN1
-    const new_outline = Math.floor(line_in.lines[1]) + tN2
-    const twist: FullNotationLine = {
-        crossing_id: line_in.crossing_id,
-        placement: null,
-        edges: [tN1,tN2],
-        lines: [new_inline,new_outline]
-    }
-    line_in.lines[1] = new_inline;
-    line_out.lines[0] = new_outline;
-    const f_lines: FullNotation = [line_in, twist, line_out]
-    return f_lines;
+
+export function R1_Twist(line: [number, number], twistNum: number, twistType: number): FullNotation {
+  /*
+      twistType will be 0/1
+    If twistType is 0 the line coming from a is the overstrand
+    If twistType is 1 the line coming from a is the understrand
+      twistNum will be .1, .2, ...
+      line given as in, out in current orientation
+         --
+        /  \
+        \  /
+        c  d          c = b+.01, d = a+.01
+         \/
+         /\
+        a  b          a = x+.1, b = y+.1
+       /    \
+      x      y        x & y remain unchanged
+
+  */
+  const a = addOffset(line[0], .1)
+  const b = addOffset(line[1], .1)
+  const twist0: FullNotationEntry = {
+    strand_id: twistNum,
+    placement: twistType === 0 ? 'over' : 'under',
+    arcs: [a, addOffset(a,.01)],
+    crossing_id: twistNum
+  };
+  const twist1: FullNotationEntry = {
+    strand_id: twistNum,
+    placement: twistType === 1 ? 'over' : 'under',
+    arcs: [addOffset(b,.01), b],
+    crossing_id: twistNum
+  }
+  const twists: FullNotation = [twist0, twist1]
+  return twists;
 }
 
 export function getTwistLineOptions(_fullNotation: FullNotation): number[] {

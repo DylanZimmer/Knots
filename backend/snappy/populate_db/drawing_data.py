@@ -9,10 +9,19 @@ from supabase import create_client
 
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 BATCH_SIZE = 500
+ARCHIVE_SCHEMA = "archive"
+ARCHIVE_TABLE = "knot_diagrams_old"
+ARCHIVE_ID_FIELD = "knot_id"
+ARCHIVE_PD_FIELD = "pd_notation"
+SOURCE_SCHEMA = "public"
+SOURCE_TABLE = "knots"
+SOURCE_NAME_FIELD = "name"
 SOURCE_ID_FIELD = "id"
 TARGET_ID_FIELD = "id"
-SOURCE_TABLE = "knots"
+TARGET_SCHEMA = "public"
 TARGET_TABLE = "diagrams_rolf"
+KNOT_ID_OFFSET = 13557  # diagrams_rolf.id = knot_diagrams_old.knot_id - KNOT_ID_OFFSET
+DIAGRAM_IDS_TO_PROCESS = [5423]
 
 
 def load_backend_env() -> None:
@@ -47,60 +56,8 @@ def parse_pd(pd_input: str | list[list[int]]) -> list[list[int]]:
     return json.loads(pd_input) if isinstance(pd_input, str) else pd_input
 
 
-def parse_cin(cin_input):
-    return json.loads(cin_input) if isinstance(cin_input, str) else cin_input
-
-
-def build_oriented_pd_from_cin(cin: str | list[dict]) -> list[list[int]]:
-    cin_entries = parse_cin(cin) if isinstance(cin, str) else cin
-
-    crossings: dict[int, dict] = {}
-    for entry in cin_entries:
-        crossing_id = int(entry["crossing_id"])
-        placement = str(entry["placement"]).lower()
-        edges = entry["edges"]
-        slot = entry.get("slot")
-
-        if slot is None:
-            raise ValueError("full_notation entries must include a slot field")
-
-        if crossing_id not in crossings:
-            crossings[crossing_id] = {"slots": {}, "placements": {}}
-
-        crossings[crossing_id]["slots"][int(slot)] = tuple(edges)
-        crossings[crossing_id]["placements"][int(slot)] = placement
-
-    oriented_pd = []
-    for crossing_id in sorted(crossings):
-        slots = crossings[crossing_id]["slots"]
-        placements = crossings[crossing_id]["placements"]
-
-        if 0 not in slots or 1 not in slots:
-            raise ValueError(f"Crossing {crossing_id} must contain slots 0 and 1")
-
-        if placements.get(0) == "under" and placements.get(1) == "over":
-            sign = 1
-        elif placements.get(0) == "over" and placements.get(1) == "under":
-            sign = -1
-        else:
-            raise ValueError(
-                f"Crossing {crossing_id} must use under/over placements for slots 0 and 1"
-            )
-
-        a, d = slots[0]
-        b, c = slots[1]
-        oriented_pd.append([a, b, c, d, sign])
-
-    return oriented_pd
-
-
-def build_pd_from_cin(cin: str | list[dict]) -> list[list[int]]:
-    oriented_pd = build_oriented_pd_from_cin(cin)
-    return [crossing[:4] for crossing in oriented_pd]
-
-
-def build_drawing_data(full_notation: str | list[dict]) -> dict:
-    pd_code = build_pd_from_cin(full_notation)
+def build_drawing_data(pd_notation: str | list[list[int]]) -> dict:
+    pd_code = parse_pd(pd_notation)
     link = Link(pd_code)
     diagram = OrthogonalLinkDiagram(link)
     vertex_positions, arrows, crossing_specs = diagram.plink_data()
@@ -112,93 +69,217 @@ def build_drawing_data(full_notation: str | list[dict]) -> dict:
     }
 
 
-def fetch_knots_batch(supabase, start: int) -> list[dict]:
-    result = (
-        supabase.table(SOURCE_TABLE)
-        .select(f"{SOURCE_ID_FIELD},name,full_notation")
-        .order(SOURCE_ID_FIELD)
-        .range(start, start + BATCH_SIZE - 1)
+def fetch_knots_batch(supabase, start_diagram_id: int) -> list[dict]:
+    archive_start_id = start_diagram_id + KNOT_ID_OFFSET
+    archive_result = (
+        supabase.schema(ARCHIVE_SCHEMA).table(ARCHIVE_TABLE)
+        .select(f"{ARCHIVE_ID_FIELD},{ARCHIVE_PD_FIELD}")
+        .gte(ARCHIVE_ID_FIELD, archive_start_id)
+        .order(ARCHIVE_ID_FIELD)
+        .range(0, BATCH_SIZE - 1)
         .execute()
     )
-    return result.data or []
+    archive_rows = archive_result.data or []
+    if not archive_rows:
+        return []
+
+    diagram_ids = [row[ARCHIVE_ID_FIELD] - KNOT_ID_OFFSET for row in archive_rows]
+
+    knot_result = (
+        supabase.schema(SOURCE_SCHEMA).table(SOURCE_TABLE)
+        .select(f"{SOURCE_ID_FIELD},{SOURCE_NAME_FIELD}")
+        .in_(SOURCE_ID_FIELD, diagram_ids)
+        .execute()
+    )
+    knots_by_id = {row[SOURCE_ID_FIELD]: row for row in knot_result.data or []}
+
+    batch = []
+    for row in archive_rows:
+        diagram_id = row[ARCHIVE_ID_FIELD] - KNOT_ID_OFFSET
+        knot = knots_by_id.get(diagram_id, {})
+        batch.append(
+            {
+                TARGET_ID_FIELD: diagram_id,
+                SOURCE_NAME_FIELD: knot.get(SOURCE_NAME_FIELD),
+                ARCHIVE_PD_FIELD: row.get(ARCHIVE_PD_FIELD),
+            }
+        )
+
+    return batch
+
+
+def fetch_knots_by_ids(supabase, diagram_ids: list[int]) -> list[dict]:
+    archive_ids = [diagram_id + KNOT_ID_OFFSET for diagram_id in diagram_ids]
+
+    archive_result = (
+        supabase.schema(ARCHIVE_SCHEMA).table(ARCHIVE_TABLE)
+        .select(f"{ARCHIVE_ID_FIELD},{ARCHIVE_PD_FIELD}")
+        .in_(ARCHIVE_ID_FIELD, archive_ids)
+        .execute()
+    )
+    archive_by_diagram_id = {
+        row[ARCHIVE_ID_FIELD] - KNOT_ID_OFFSET: row for row in (archive_result.data or [])
+    }
+
+    knot_result = (
+        supabase.schema(SOURCE_SCHEMA).table(SOURCE_TABLE)
+        .select(f"{SOURCE_ID_FIELD},{SOURCE_NAME_FIELD}")
+        .in_(SOURCE_ID_FIELD, diagram_ids)
+        .execute()
+    )
+    knots_by_id = {row[SOURCE_ID_FIELD]: row for row in knot_result.data or []}
+
+    knots = []
+    for diagram_id in diagram_ids:
+        archive_row = archive_by_diagram_id.get(diagram_id, {})
+        knot_row = knots_by_id.get(diagram_id, {})
+        knots.append(
+            {
+                TARGET_ID_FIELD: diagram_id,
+                SOURCE_NAME_FIELD: knot_row.get(SOURCE_NAME_FIELD),
+                ARCHIVE_PD_FIELD: archive_row.get(ARCHIVE_PD_FIELD),
+            }
+        )
+
+    return knots
 
 
 def update_knot_drawing_data(
     supabase,
-    knot_id: int | str,
-    knot_name: str | None,
+    id: int | str,
+    name: str | None,
     vertex_positions,
     arrows,
     crossing_specs,
 ) -> None:
-    (
-        supabase.table(TARGET_TABLE)
-        .upsert(
-            {
-                TARGET_ID_FIELD: knot_id,
-                "name": knot_name,
-                "vertex_positions": vertex_positions,
-                "arrows": arrows,
-                "crossing_specs": crossing_specs,
-            },
-            on_conflict=TARGET_ID_FIELD,
-        )
-        .execute()
+    supabase.schema(TARGET_SCHEMA).table(TARGET_TABLE).upsert(
+        {
+            TARGET_ID_FIELD: id,
+            "name": name,
+            "vertex_positions": json.dumps(vertex_positions) if vertex_positions is not None else None,
+            "arrows": json.dumps(arrows) if arrows is not None else None,
+            "crossing_specs": json.dumps(crossing_specs) if crossing_specs is not None else None,
+        },
+        on_conflict=TARGET_ID_FIELD,
+    ).execute()
+
+
+def process_knots(supabase, knots: list[dict]) -> tuple[int, int, int, int]:
+    processed = 0
+    updated = 0
+    skipped = 0
+    failed = 0
+
+    for knot in knots:
+        processed += 1
+        knot_id = knot[SOURCE_ID_FIELD]
+        knot_name = knot.get("name")
+        pd_notation = knot.get(ARCHIVE_PD_FIELD)
+
+        if not pd_notation:
+            try:
+                update_knot_drawing_data(supabase, knot_id, knot_name, None, None, None)
+            except Exception as exc:
+                failed += 1
+                print(
+                    f"Diagram ID {knot_id}: failed to write null drawing data — "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                continue
+            skipped += 1
+            print(f"Diagram ID {knot_id}: skipped (no pd_notation)")
+            continue
+
+        try:
+            drawing_data = build_drawing_data(pd_notation)
+        except Exception as exc:
+            failed += 1
+            print(
+                f"Diagram ID {knot_id}: failed to build drawing data — "
+                f"{type(exc).__name__}: {exc}"
+            )
+            continue
+
+        try:
+            update_knot_drawing_data(
+                supabase,
+                knot_id,
+                knot_name,
+                drawing_data["vertex_positions"],
+                drawing_data["arrows"],
+                drawing_data["crossing_specs"],
+            )
+        except Exception as exc:
+            failed += 1
+            print(
+                f"Diagram ID {knot_id}: failed to write drawing data — "
+                f"{type(exc).__name__}: {exc}"
+            )
+            continue
+
+        updated += 1
+        print(f"Diagram ID {knot_id}: updated drawing data")
+
+    return processed, updated, skipped, failed
+
+
+def process_specific_knots(diagram_ids: list[int]) -> None:
+    supabase = get_supabase()
+
+    try:
+        knots = fetch_knots_by_ids(supabase, diagram_ids)
+    except Exception as exc:
+        print(f"Failed to fetch requested diagram IDs {diagram_ids}: {type(exc).__name__}: {exc}")
+        return
+
+    processed, updated, skipped, failed = process_knots(supabase, knots)
+
+    print(
+        f"\nFinished. Processed {processed}, updated {updated}, "
+        f"skipped {skipped}, failed {failed}."
     )
 
 
-def process_all_knots() -> None:
+def process_all_knots(start_id: int = 1109) -> None:
     supabase = get_supabase()
     processed = 0
     updated = 0
     skipped = 0
     failed = 0
-    start = 0
+    next_diagram_id = start_id
 
     while True:
-        knots = fetch_knots_batch(supabase, start)
+        try:
+            knots = fetch_knots_batch(supabase, next_diagram_id)
+        except Exception as exc:
+            print(
+                f"Failed to fetch batch starting at diagram ID {next_diagram_id}: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            print("Aborting.")
+            break
+
         if not knots:
             break
 
-        for knot in knots:
-            processed += 1
-            knot_id = knot[SOURCE_ID_FIELD]
-            knot_name = knot.get("name")
-            full_notation = knot.get("full_notation")
+        batch_processed, batch_updated, batch_skipped, batch_failed = process_knots(supabase, knots)
+        processed += batch_processed
+        updated += batch_updated
+        skipped += batch_skipped
+        failed += batch_failed
+        if updated and updated % 100 == 0:
+            print(f"Drawing data updated for {updated} diagrams (last ID: {knots[-1][SOURCE_ID_FIELD]})")
 
-            if not full_notation:
-                update_knot_drawing_data(supabase, knot_id, knot_name, None, None, None)
-                skipped += 1
-                print(f"Knot ID {knot_id}: skipped because full_notation is missing")
-                continue
-
-            try:
-                drawing_data = build_drawing_data(full_notation)
-                update_knot_drawing_data(
-                    supabase,
-                    knot_id,
-                    knot_name,
-                    drawing_data["vertex_positions"],
-                    drawing_data["arrows"],
-                    drawing_data["crossing_specs"],
-                )
-                updated += 1
-                if updated % 500 == 0:
-                    print("Drawing data updated for ", updated, " knots")
-            except Exception as exc:
-                failed += 1
-                print(f"Knot ID {knot_id}: failed with {type(exc).__name__}: {exc}")
-
-        start += len(knots)
+        next_diagram_id = knots[-1][SOURCE_ID_FIELD] + 1
 
     print(
-        f"Finished processing {processed} knots. "
-        f"Updated {updated}, skipped {skipped}, failed {failed}."
+        f"\nFinished. Processed {processed}, updated {updated}, "
+        f"skipped {skipped}, failed {failed}."
     )
 
 
 def main() -> None:
-    process_all_knots()
+    process_specific_knots(DIAGRAM_IDS_TO_PROCESS)
 
 
 if __name__ == "__main__":
