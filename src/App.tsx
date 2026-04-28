@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import './App.css';
 import { getApiUrl } from './api';
 import * as moves from './moves_in_fn';
+import { cloneFullNotation, normalizeFullNotation } from '../shared/fullNotation'
 import type { FullNotation } from '../shared/types'
 
 type KnotGeometryPayload = {
@@ -95,11 +96,19 @@ async function readJsonResponse(res: Response) {
   }
 }
 
-function cloneFullNotation(fullNotation: FullNotation): FullNotation {
-  return fullNotation.map((line) => ({
-    ...line,
-    arcs: [...line.arcs] as [number, number],
-  }))
+function normalizeMovesPayload(payload: unknown, fallbackName: string): KnotMovesPayload {
+  const payloadRecord =
+    payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>)
+      : null
+
+  return {
+    name:
+      typeof payloadRecord?.name === 'string' && payloadRecord.name.trim().length > 0
+        ? payloadRecord.name
+        : fallbackName,
+    full_notation: normalizeFullNotation(payloadRecord?.full_notation ?? null),
+  }
 }
 
 // ─── KnotPicker ─────────────────────────────────────────────────────────────
@@ -466,7 +475,7 @@ function App() {
         }
 
         if (!cancelled) {
-          setMovesPayload(payload)
+          setMovesPayload(normalizeMovesPayload(payload, knotName))
           setMovesError(null)
         }
       } catch (error) {

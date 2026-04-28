@@ -5,7 +5,7 @@ import {
   type KnotMovesPayload,
   type KnotOptionRecord,
   createHttpError,
-  parseJsonValue,
+  normalizeFullNotationValue,
 } from './common'
 
 const KNOT_LIST_PAGE_SIZE = 1000
@@ -81,7 +81,7 @@ export async function getStoredKnotFullNotation(name: string): Promise<KnotMoves
       typeof storedName === 'string' && storedName.trim().length > 0
         ? storedName
         : name,
-    full_notation: parseJsonValue(full_notation),
+    full_notation: normalizeFullNotationValue(full_notation),
   }
 }
 

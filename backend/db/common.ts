@@ -1,3 +1,6 @@
+import { normalizeFullNotation } from '../../shared/fullNotation.ts'
+import type { FullNotation } from '../../shared/types.ts'
+
 export type DiagramGeometryPayload = {
   name: string
   moves?: string[]
@@ -8,7 +11,7 @@ export type DiagramGeometryPayload = {
 
 export type KnotMovesPayload = {
   name: string
-  full_notation: unknown
+  full_notation: FullNotation | null
 }
 
 export type KnotOptionRecord = {
@@ -74,6 +77,10 @@ export function parseJsonValue(value: unknown) {
   }
 
   return parseJsonText(value)
+}
+
+export function normalizeFullNotationValue(value: unknown) {
+  return normalizeFullNotation(parseJsonValue(value))
 }
 
 export function parseNumericId(value: unknown, fieldName: string) {

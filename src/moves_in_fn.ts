@@ -1,4 +1,4 @@
-import type { FullNotation, FullNotationEntry, Geometry } from './types.ts';
+import type { FullNotation, FullNotationEntry } from '../shared/types.ts';
 
 /*
 Full Notation:
@@ -19,13 +19,20 @@ export function getMoveRouteKey(moveName: string): string {
 
 export function flipOrientation(fullNotation: FullNotation): FullNotation {
   return fullNotation.map((line) => ({
-    ...line, arcs: [line.arcs[1], line.arcs[0]],
+    ...line,
+    arcs: [line.arcs[1], line.arcs[0]],
+    edges: [line.arcs[1], line.arcs[0]],
   }))
 }
 
 export function mirror(fullNotation: FullNotation): FullNotation {
+  const togglePlacement = (placement: 'over' | 'under') =>
+    placement === 'over' ? 'under' : 'over'
+
   return fullNotation.map((line) => ({
-    ...line, placement: line.placement === 'over' ? 'under' : 'over',
+    ...line,
+    placement: togglePlacement(line.placement),
+    position: togglePlacement(line.placement),
   }))
 }
 

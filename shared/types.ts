@@ -12,6 +12,8 @@ export interface FullNotationLine {
   placement: Placement
   arcs: [number, number]
   crossing_id: number
+  edges?: [number, number]
+  position?: Placement
 }
 
 export type FullNotationEntry = FullNotationLine
