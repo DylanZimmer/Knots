@@ -42,6 +42,16 @@ const snappyPythonBin =
       ? localSnappyPythonBinWindows
       : null) ||
   'python3'
+const snappyStartupPollMs = 100
+const defaultSnappyStartupTimeoutMs = process.env.NODE_ENV === 'production' ? 60_000 : 5_000
+const parsedSnappyStartupTimeoutMs = Number.parseInt(
+  process.env.SNAPPY_STARTUP_TIMEOUT_MS || '',
+  10,
+)
+const snappyStartupTimeoutMs =
+  Number.isFinite(parsedSnappyStartupTimeoutMs) && parsedSnappyStartupTimeoutMs > 0
+    ? parsedSnappyStartupTimeoutMs
+    : defaultSnappyStartupTimeoutMs
 
 type CurrentDiagramMoveHandler = () => Promise<DiagramGeometryPayload>
 
@@ -72,6 +82,15 @@ async function isSnappyHealthy() {
   } catch {
     return false
   }
+}
+
+function getSnappyStartupErrorDetails() {
+  const details = snappyLastError.trim()
+  if (!details) {
+    return ''
+  }
+
+  return details.length > 2_000 ? details.slice(-2_000) : details
 }
 
 function normalizeMoveKey(value: string) {
@@ -227,6 +246,12 @@ function startSnappyProcess() {
     process.stderr.write(`[snappy] ${text}`)
   })
 
+  snappyProcess.on('error', (err) => {
+    const message = `${err.name}: ${err.message}`
+    snappyLastError += `${message}\n`
+    console.error(`[snappy] ${message}`)
+  })
+
   snappyProcess.on('exit', () => {
     snappyProcess = null
     snappyBootPromise = null
@@ -299,19 +324,29 @@ async function ensureSnappyServer() {
     snappyBootPromise = (async () => {
       startSnappyProcess()
 
-      for (let attempt = 0; attempt < 50; attempt += 1) {
+      const maxAttempts = Math.max(1, Math.ceil(snappyStartupTimeoutMs / snappyStartupPollMs))
+
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         if (await isSnappyHealthy()) {
           return
         }
 
         if (snappyProcess?.exitCode !== null || !snappyProcess) {
-          throw new Error(snappyLastError.trim() || 'Snappy server exited before becoming ready')
+          throw new Error(
+            getSnappyStartupErrorDetails() || 'Snappy server exited before becoming ready',
+          )
         }
 
-        await sleep(100)
+        await sleep(snappyStartupPollMs)
       }
 
-      throw new Error('Timed out waiting for the snappy server to start')
+      const details = getSnappyStartupErrorDetails()
+      shutdownSnappyServer()
+      throw new Error(
+        details
+          ? `Timed out waiting ${snappyStartupTimeoutMs}ms for the snappy server to start. Recent snappy output:\n${details}`
+          : `Timed out waiting ${snappyStartupTimeoutMs}ms for the snappy server to start`,
+      )
     })()
   }
 
@@ -379,10 +414,7 @@ const currentDiagramMoveHandlers: Record<string, CurrentDiagramMoveHandler> = {
 
 startSnappyWatchers()
 void ensureSnappyServer().catch((err) => {
-  console.error(`Failed to start snappy with ${snappyPythonBin}:`, err)
-  shutdownSnappyWatchers()
-  shutdownSnappyServer()
-  process.exit(1)
+  console.error(`Initial snappy startup with ${snappyPythonBin} did not complete:`, err)
 })
 
 process.on('exit', shutdownSnappyServer)
