@@ -4,12 +4,13 @@ import os
 
 from postgrest.exceptions import APIError
 from supabase import create_client
+from diagram_geometry import ROLF_TABLE, fetch_geometry_map_for_base_rows
 
 
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 BATCH_SIZE = 500
 SOURCE_SCHEMA = "public"
-SOURCE_TABLE = "diagrams_rolf"
+SOURCE_TABLE = ROLF_TABLE
 SOURCE_ID_FIELD = "id"
 TARGET_SCHEMA = "public"
 TARGET_TABLE = "knots"
@@ -233,7 +234,7 @@ def fetch_batch(supabase, start: int) -> list[dict]:
     try:
         result = (
             get_table(supabase, SOURCE_SCHEMA, SOURCE_TABLE)
-            .select(f"{SOURCE_ID_FIELD},vertex_positions,arrows,crossing_specs")
+            .select(f"{SOURCE_ID_FIELD},diagram_id")
             .order(SOURCE_ID_FIELD)
             .range(start, start + BATCH_SIZE - 1)
             .execute()
@@ -246,8 +247,10 @@ def fetch_batch(supabase, start: int) -> list[dict]:
             table_name=SOURCE_TABLE,
         )
 
+    base_rows = result.data or []
+
     # Join with the target knots table to get existing full_notation.
-    ids = [row[SOURCE_ID_FIELD] for row in result.data or []]
+    ids = [row[SOURCE_ID_FIELD] for row in base_rows]
     if not ids:
         return []
 
@@ -266,11 +269,34 @@ def fetch_batch(supabase, start: int) -> list[dict]:
             table_name=TARGET_TABLE,
         )
 
+    try:
+        geometry_by_id = fetch_geometry_map_for_base_rows(
+            supabase,
+            get_table,
+            SOURCE_SCHEMA,
+            base_rows,
+            base_id_field=SOURCE_ID_FIELD,
+        )
+    except APIError as exc:
+        wrap_schema_api_error(
+            exc,
+            action="read from",
+            schema_name=SOURCE_SCHEMA,
+            table_name=SOURCE_TABLE,
+        )
+
     fn_by_id = {row[TARGET_ID_FIELD]: row["full_notation"] for row in fn_result.data or []}
 
     combined = []
-    for row in result.data:
-        combined.append({**row, "full_notation": fn_by_id.get(row[SOURCE_ID_FIELD])})
+    for row in base_rows:
+        geometry = geometry_by_id.get(row[SOURCE_ID_FIELD], {})
+        combined.append(
+            {
+                **row,
+                **geometry,
+                "full_notation": fn_by_id.get(row[SOURCE_ID_FIELD]),
+            }
+        )
     return combined
 
 

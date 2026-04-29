@@ -1,10 +1,5 @@
 import type { CrossingSpec, FullNotation, Vertex } from '../shared/types'
 
-/*
-function geometry_line_from_fn_line(fn_line): geometry_line {
-
-}
-*/
 
 export function add_Reidemeister_to_geometry(
   vertex_positions: Vertex[],

@@ -4,13 +4,18 @@ import os
 
 from postgrest.exceptions import APIError
 from supabase import create_client
+from diagram_geometry import (
+    ROLF_TABLE,
+    fetch_geometry_map_for_base_rows,
+    fetch_geometry_map_for_ids,
+)
 
 
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 BATCH_SIZE = 500
 
 # archive.knot_diagrams_old is the source of Gauss notation.
-# public.diagrams_rolf is the source of crossing_specs.
+# public.diagrams_rolf is the source of the normalized geometry tables.
 # The join key is: diagrams_rolf.id = knot_diagrams_old.knot_id - 13557
 GAUSS_SCHEMA = "archive"
 GAUSS_TABLE = "knot_diagrams_old"
@@ -18,7 +23,7 @@ GAUSS_ID_FIELD = "knot_id"
 GAUSS_FIELD = "gauss_notation"
 
 DIAGRAM_SCHEMA = "public"
-DIAGRAM_TABLE = "diagrams_rolf"
+DIAGRAM_TABLE = ROLF_TABLE
 DIAGRAM_ID_FIELD = "id"
 
 TARGET_SCHEMA = "public"
@@ -270,7 +275,9 @@ def fetch_batch(supabase, start: int) -> list[dict]:
     """
     Fetch a batch of knots joining:
       - archive.knot_diagrams_old  (gauss_notation, keyed by knot_id)
-      - public.diagrams_rolf       (vertex_positions, arrows, crossing_specs, keyed by id)
+      - public.diagrams_rolf       (diagram_id, keyed by id)
+      - public.vertices_and_arrows (normalized vertex_positions + arrows)
+      - public.crossing_specs      (normalized crossing_specs)
       - public.knots               (full_notation, keyed by id)
 
     Join: diagrams_rolf.id = knot_diagrams_old.knot_id - KNOT_ID_OFFSET
@@ -294,9 +301,9 @@ def fetch_batch(supabase, start: int) -> list[dict]:
     diagram_ids = [row[GAUSS_ID_FIELD] - KNOT_ID_OFFSET for row in gauss_rows]
 
     try:
-        diagram_result = (
+        diagram_base_result = (
             get_table(supabase, DIAGRAM_SCHEMA, DIAGRAM_TABLE)
-            .select(f"{DIAGRAM_ID_FIELD},vertex_positions,arrows,crossing_specs")
+            .select(f"{DIAGRAM_ID_FIELD},diagram_id")
             .in_(DIAGRAM_ID_FIELD, diagram_ids)
             .execute()
         )
@@ -313,13 +320,23 @@ def fetch_batch(supabase, start: int) -> list[dict]:
     except APIError as exc:
         wrap_schema_api_error(exc, action="read from", schema_name=TARGET_SCHEMA, table_name=TARGET_TABLE)
 
-    diagram_by_id = {row[DIAGRAM_ID_FIELD]: row for row in diagram_result.data or []}
+    try:
+        geometry_by_id = fetch_geometry_map_for_base_rows(
+            supabase,
+            get_table,
+            DIAGRAM_SCHEMA,
+            diagram_base_result.data or [],
+            base_id_field=DIAGRAM_ID_FIELD,
+        )
+    except APIError as exc:
+        wrap_schema_api_error(exc, action="read from", schema_name=DIAGRAM_SCHEMA, table_name=DIAGRAM_TABLE)
+
     knot_by_id = {row[TARGET_ID_FIELD]: row for row in knot_result.data or []}
 
     combined = []
     for row in gauss_rows:
         diagram_id = row[GAUSS_ID_FIELD] - KNOT_ID_OFFSET
-        diagram = diagram_by_id.get(diagram_id)
+        diagram = geometry_by_id.get(diagram_id)
         knot = knot_by_id.get(diagram_id)
         combined.append({
             "diagram_id": diagram_id,
@@ -347,16 +364,6 @@ def fetch_by_ids(supabase, diagram_ids: list[int]) -> list[dict]:
         wrap_schema_api_error(exc, action="read from", schema_name=GAUSS_SCHEMA, table_name=GAUSS_TABLE)
 
     try:
-        diagram_result = (
-            get_table(supabase, DIAGRAM_SCHEMA, DIAGRAM_TABLE)
-            .select(f"{DIAGRAM_ID_FIELD},vertex_positions,arrows,crossing_specs")
-            .in_(DIAGRAM_ID_FIELD, diagram_ids)
-            .execute()
-        )
-    except APIError as exc:
-        wrap_schema_api_error(exc, action="read from", schema_name=DIAGRAM_SCHEMA, table_name=DIAGRAM_TABLE)
-
-    try:
         knot_result = (
             get_table(supabase, TARGET_SCHEMA, TARGET_TABLE)
             .select(f"{TARGET_ID_FIELD},full_notation")
@@ -366,16 +373,26 @@ def fetch_by_ids(supabase, diagram_ids: list[int]) -> list[dict]:
     except APIError as exc:
         wrap_schema_api_error(exc, action="read from", schema_name=TARGET_SCHEMA, table_name=TARGET_TABLE)
 
+    try:
+        geometry_by_id = fetch_geometry_map_for_ids(
+            supabase,
+            get_table,
+            DIAGRAM_SCHEMA,
+            diagram_ids,
+            base_id_field=DIAGRAM_ID_FIELD,
+        )
+    except APIError as exc:
+        wrap_schema_api_error(exc, action="read from", schema_name=DIAGRAM_SCHEMA, table_name=DIAGRAM_TABLE)
+
     gauss_by_diagram_id = {
         row[GAUSS_ID_FIELD] - KNOT_ID_OFFSET: row for row in (gauss_result.data or [])
     }
-    diagram_by_id = {row[DIAGRAM_ID_FIELD]: row for row in diagram_result.data or []}
     knot_by_id = {row[TARGET_ID_FIELD]: row for row in knot_result.data or []}
 
     combined = []
     for diagram_id in diagram_ids:
         gauss = gauss_by_diagram_id.get(diagram_id)
-        diagram = diagram_by_id.get(diagram_id)
+        diagram = geometry_by_id.get(diagram_id)
         knot = knot_by_id.get(diagram_id)
         combined.append({
             "diagram_id": diagram_id,

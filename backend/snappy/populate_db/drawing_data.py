@@ -5,6 +5,7 @@ import os
 from spherogram import Link
 from spherogram.links.orthogonal import OrthogonalLinkDiagram
 from supabase import create_client
+from diagram_geometry import replace_geometry
 
 
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
@@ -19,7 +20,6 @@ SOURCE_NAME_FIELD = "name"
 SOURCE_ID_FIELD = "id"
 TARGET_ID_FIELD = "id"
 TARGET_SCHEMA = "public"
-TARGET_TABLE = "diagrams_rolf"
 KNOT_ID_OFFSET = 13557  # diagrams_rolf.id = knot_diagrams_old.knot_id - KNOT_ID_OFFSET
 DIAGRAM_IDS_TO_PROCESS = [5423]
 
@@ -50,6 +50,12 @@ def get_supabase():
         )
 
     return create_client(url, key)
+
+
+def get_table(supabase, schema_name: str | None, table_name: str):
+    if schema_name:
+        return supabase.schema(schema_name).table(table_name)
+    return supabase.table(table_name)
 
 
 def parse_pd(pd_input: str | list[list[int]]) -> list[list[int]]:
@@ -152,16 +158,17 @@ def update_knot_drawing_data(
     arrows,
     crossing_specs,
 ) -> None:
-    supabase.schema(TARGET_SCHEMA).table(TARGET_TABLE).upsert(
-        {
-            TARGET_ID_FIELD: id,
-            "name": name,
-            "vertex_positions": json.dumps(vertex_positions) if vertex_positions is not None else None,
-            "arrows": json.dumps(arrows) if arrows is not None else None,
-            "crossing_specs": json.dumps(crossing_specs) if crossing_specs is not None else None,
-        },
-        on_conflict=TARGET_ID_FIELD,
-    ).execute()
+    replace_geometry(
+        supabase,
+        get_table,
+        TARGET_SCHEMA,
+        knot_id=id,
+        name=name,
+        vertex_positions=vertex_positions,
+        arrows=arrows,
+        crossing_specs=crossing_specs,
+        base_id_field=TARGET_ID_FIELD,
+    )
 
 
 def process_knots(supabase, knots: list[dict]) -> tuple[int, int, int, int]:

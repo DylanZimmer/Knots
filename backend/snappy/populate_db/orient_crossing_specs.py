@@ -1,9 +1,9 @@
 from pathlib import Path
-import json
 import os
 
 from postgrest.exceptions import APIError
 from supabase import create_client
+from diagram_geometry import ROLF_TABLE, fetch_geometry_map_for_base_rows
 
 
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
@@ -37,12 +37,6 @@ def get_table(supabase, schema_name: str | None, table_name: str):
     if schema_name:
         return supabase.schema(schema_name).table(table_name)
     return supabase.table(table_name)
-
-
-def ensure_parsed(value):
-    if isinstance(value, str):
-        return json.loads(value)
-    return value
 
 
 def wrap_schema_api_error(exc: APIError, *, action: str, schema_name: str | None, table_name: str):
@@ -88,7 +82,7 @@ def fetch_all_rows(table) -> list:
     offset = 0
     while True:
         response = (
-            table.select("id, vertex_positions, arrows, crossing_specs")
+            table.select("id,diagram_id")
             .range(offset, offset + PAGE_SIZE - 1)
             .execute()
         )
@@ -100,46 +94,58 @@ def fetch_all_rows(table) -> list:
     return all_rows
 
 
-def update_crossing_signs(schema_name: str | None = None, table_name: str = "diagrams_rolf") -> None:
+def update_crossing_signs(schema_name: str | None = None, table_name: str = ROLF_TABLE) -> None:
     supabase = get_supabase()
     table = get_table(supabase, schema_name, table_name)
 
     try:
-        rows = fetch_all_rows(table)
+        base_rows = fetch_all_rows(table)
     except APIError as exc:
         wrap_schema_api_error(exc, action="read", schema_name=schema_name, table_name=table_name)
 
-    print(f"Fetched {len(rows)} rows from {table_name}")
+    try:
+        geometry_by_id = fetch_geometry_map_for_base_rows(
+            supabase,
+            get_table,
+            schema_name,
+            base_rows,
+        )
+    except APIError as exc:
+        wrap_schema_api_error(exc, action="read", schema_name=schema_name, table_name=table_name)
+
+    print(
+        f"Fetched {len(base_rows)} rows from {table_name}. "
+        "The normalized crossing_specs table no longer stores a sign column, "
+        "so this script now reports computed signs instead of writing them back."
+    )
 
     skipped = 0
-    updated = 0
+    reported = 0
 
-    for row in rows:
+    for row in base_rows:
         row_id = row["id"]
-        crossing_specs = ensure_parsed(row["crossing_specs"])
+        geometry = geometry_by_id.get(row_id)
 
-        if not crossing_specs or not isinstance(crossing_specs[0][2], bool):
+        if not geometry:
             skipped += 1
             continue
 
-        vertex_positions = ensure_parsed(row["vertex_positions"])
-        arrows = ensure_parsed(row["arrows"])
+        crossing_specs = geometry["crossing_specs"]
+        if not crossing_specs:
+            skipped += 1
+            continue
 
-        updated_specs = []
-        for spec in crossing_specs:
-            a, b, _old_bool, d = spec
-            sign = crossing_sign(a, b, vertex_positions, arrows)
-            updated_specs.append([a, b, sign, d])
+        vertex_positions = geometry["vertex_positions"]
+        arrows = geometry["arrows"]
+        signed_specs = []
+        for under_line, over_line, crossing_id in crossing_specs:
+            sign = crossing_sign(under_line, over_line, vertex_positions, arrows)
+            signed_specs.append([under_line, over_line, sign, crossing_id])
 
-        try:
-            table.update({"crossing_specs": json.dumps(updated_specs)}).eq("id", row_id).execute()
-        except APIError as exc:
-            wrap_schema_api_error(exc, action="update", schema_name=schema_name, table_name=table_name)
+        print(f"  Diagram {row_id}: {signed_specs}")
+        reported += 1
 
-        print(f"  Updated row {row_id}: {crossing_specs} -> {updated_specs}")
-        updated += 1
-
-    print(f"Done. Updated {updated}, skipped {skipped} (already converted).")
+    print(f"Done. Reported {reported}, skipped {skipped}.")
 
 
 if __name__ == "__main__":

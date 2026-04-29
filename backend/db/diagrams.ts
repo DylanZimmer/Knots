@@ -4,10 +4,12 @@ import {
   type DiagramGeometryPayload,
   createHttpError,
   normalizeMovesValue,
+  parseNumericId,
   parseJsonValue,
 } from './common'
 import { initializeCurrentInvariants, syncCurrentInvariantMoves } from './invariants'
 import { getKnotIdByName, requireKnotIdByName } from './knots'
+import { getStoredRolfGeometryByKnot } from './rolfGeometry'
 
 function reverseArrowPairs(arrows: unknown) {
   if (!Array.isArray(arrows)) {
@@ -40,34 +42,19 @@ function reverseCrossingSpecPairs(crossingSpecs: unknown) {
 export async function getStoredRolfDiagramGeometry(
   name: string,
 ): Promise<DiagramGeometryPayload> {
-  const supabase = getSupabase()
-  const knotId = await getKnotIdByName(name)
+  const knotIdValue = await getKnotIdByName(name)
+  const geometry = await getStoredRolfGeometryByKnot({
+    knotId:
+      knotIdValue == null ? null : parseNumericId(knotIdValue, 'knots.id'),
+    name,
+  })
 
-  for (const knotKey of ['id', 'name'] as const) {
-    const queryValue = knotKey === 'id' ? knotId : name
-
-    if (queryValue == null) {
-      continue
-    }
-
-    const { data: diagramRow, error: diagramError } = await supabase
-      .from('diagrams_rolf')
-      .select('name, vertex_positions, arrows, crossing_specs')
-      .eq(knotKey, queryValue)
-      .single()
-
-    if (!diagramError && diagramRow) {
-      return {
-        name,
-        vertex_positions: parseJsonValue(diagramRow.vertex_positions),
-        arrows: parseJsonValue(diagramRow.arrows),
-        crossing_specs: parseJsonValue(diagramRow.crossing_specs),
-      }
-    }
+  return {
+    name,
+    vertex_positions: geometry.vertex_positions,
+    arrows: geometry.arrows,
+    crossing_specs: geometry.crossing_specs,
   }
-
-  console.error('Rolf diagram data not found for:', name)
-  throw createHttpError(404, `No rolf diagram data for '${name}'`)
 }
 
 export async function getLatestCurrentDiagramRow(): Promise<CurrentKnotDiagramRecord> {
