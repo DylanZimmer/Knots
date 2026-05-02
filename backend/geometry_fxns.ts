@@ -1,4 +1,107 @@
-import type { CrossingSpec, FullNotation, Vertex } from '../shared/types'
+import type { CrossingSpec, CrossingSpecs, FullNotation, Placement, Vertex, Vertices, VertexAndArrow, VerticesAndArrows } from '../shared/types';
+
+function get_polyline_between_crossings(
+    cid1: number, placement1: Placement, cid2: number, placement2: Placement,
+    crossing_specs: CrossingSpecs, vs_and_as: VerticesAndArrows
+): Vertices {
+
+    // Step 1: get strand indices at each crossing
+    // CrossingSpec = [crossing_id, under_line, over_line, crossing_x, crossing_y]
+    const spec1 = crossing_specs.find(s => s[0] === cid1);
+    const spec2 = crossing_specs.find(s => s[0] === cid2);
+    if (!spec1 || !spec2) return [];
+
+    const strand1 = placement1 === 'over' ? spec1[2] : spec1[1];
+    const strand2 = placement2 === 'over' ? spec2[2] : spec2[1];
+
+    // Build a lookup: start_point -> VertexAndArrow
+    const vertexMap = new Map<number, VertexAndArrow>();
+    for (const v of vs_and_as) {
+        vertexMap.set(v.start_point, v);
+    }
+
+    function walkForward(fromStrand: number, toStrand: number): Vertices | null {
+        const points: Vertices = [];
+        let current = fromStrand;
+        const visited = new Set<number>();
+
+        while (true) {
+            if (visited.has(current)) return [];
+            visited.add(current);
+
+            const vertex = vertexMap.get(current);
+            if (!vertex) return [];
+
+            if (vertex.end_point === toStrand) {
+                points.push([vertex.strand_x, vertex.strand_y]);
+                return points;
+            }
+
+            points.push([vertex.strand_x, vertex.strand_y]);
+            current = vertex.end_point;
+        }
+    }
+
+    // Step 2: try walking forward from strand1 to strand2
+    let middle = walkForward(strand1, strand2);
+    let forward = true;
+
+    // Step 3: if that failed, walk from strand2 to strand1 and reverse
+    if (!middle) {
+        middle = walkForward(strand2, strand1);
+        forward = false;
+    }
+
+    if (!middle) return [];
+
+    if (!forward) middle.reverse();
+
+    // Step 4: bookend with the actual crossing points
+    const start: Vertex = [spec1[3], spec1[4]];
+    const end: Vertex = [spec2[3], spec2[4]];
+
+    return [start, ...middle, end];
+}
+
+function midpoint_of_polyline(polyline: Vertices): Vertex {
+    function mid(x1: number, x2: number): number {
+        const btwn = Math.abs(x1 - x2)
+        return (Math.min(x1, x2) + btwn);
+    }
+    const i = Math.floor(polyline.length / 2);
+    let midpoint: Vertex = [mid(polyline[i][0], polyline[i+1][0]), mid(polyline[i][1], polyline[i+1][1])];
+    return midpoint;
+}
+
+function two_vertices_in_segment(polyline: Vertices): Vertices {
+    function pointthree(x1: number, x2: number) {
+        const x = Math.min(x1,x2);
+        return x + (Math.abs(x1-x2)*.3);
+    }
+    function pointseven(x1: number, x2: number) {
+        const x = Math.min(x1,x2);
+        return x + (Math.abs(x1-x2)*.7);
+    }
+    const i = Math.floor(polyline.length / 2);
+    let mid1: Vertex = [pointthree(polyline[i][0], polyline[i+1][0]), pointthree(polyline[i][1], polyline[i+1][1])];
+    let mid2: Vertex = [pointseven(polyline[i+1][0], polyline[i][0]), pointseven(polyline[i+1][1], polyline[i][1])];
+    return [mid1, mid2];
+}
+
+export function add_twist_to_picture(
+    cid1: number, placement1: Placement, cid2: number, placement2: Placement,
+    crossing_specs: CrossingSpecs, vs_and_as: VerticesAndArrows
+): [CrossingSpecs, VerticesAndArrows] {
+    let new_crossing_specs = crossing_specs;
+    let new_vs_and_as = vs_and_as;
+    const polyline = get_polyline_between_crossings(cid1, placement1, cid2, placement2, crossing_specs, vs_and_as);
+    if (polyline.length === 0) {
+        return [crossing_specs, vs_and_as];
+    }
+    const new_vertices = two_vertices_in_segment(polyline);
+    
+    return [new_crossing_specs, new_vs_and_as]
+}
 
 
 export function add_Reidemeister_to_geometry(

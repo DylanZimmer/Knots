@@ -10,8 +10,8 @@ type VertexAndArrowRecord = {
   diagram_id?: unknown
   start_point?: unknown
   end_point?: unknown
-  x?: unknown
-  y?: unknown
+  strand_x?: unknown
+  strand_y?: unknown
 }
 
 type CrossingSpecRecord = {
@@ -54,8 +54,8 @@ function buildGeometryFromRows(
   for (const row of vertexAndArrowRows) {
     const startPoint = parseNumericId(row.start_point, 'vertices_and_arrows.start_point')
     const endPoint = parseNumericId(row.end_point, 'vertices_and_arrows.end_point')
-    const x = parseNumericId(row.x, 'vertices_and_arrows.x')
-    const y = parseNumericId(row.y, 'vertices_and_arrows.y')
+    const x = parseNumericId(row.strand_x, 'vertices_and_arrows.strand_x')
+    const y = parseNumericId(row.strand_y, 'vertices_and_arrows.strand_y')
 
     vertexPositionsByIndex[startPoint] = [x, y]
     arrowsByIndex[startPoint] = [startPoint, endPoint]
@@ -93,7 +93,7 @@ async function fetchGeometryByDiagramId(diagramId: number): Promise<Geometry> {
   ] = await Promise.all([
     supabase
       .from('vertices_and_arrows')
-      .select('diagram_id, start_point, end_point, x, y')
+      .select('diagram_id, start_point, end_point, strand_x, strand_y')
       .eq('diagram_id', diagramId)
       .order('start_point'),
     supabase

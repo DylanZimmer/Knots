@@ -3,9 +3,8 @@ import type { FullNotation, FullNotationEntry } from '../shared/types.ts';
 /*
 Full Notation:
 
-{crossing_id: x; placement: over/under; edges: a,b; lines: u,v}
+{strand_id: s_id; placement: over/under; edges: a,b; crossing_id: c_id}
 and edge a is going in, coming out at edge b
-u is the line going in at a, v is the line coming out at b
 */
 
 const addOffset = (x: number, offset: number, precision = 3) => {

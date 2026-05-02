@@ -108,12 +108,12 @@ def normalized_crossing_specs(crossing_specs):
     for index, spec in enumerate(crossing_specs):
         if not isinstance(spec, (list, tuple)) or len(spec) < 2:
             raise ValueError(
-                "Each crossing_spec must contain at least the over and under arrow indexes"
+                "Each crossing_spec must contain at least the under and over arrow indexes"
             )
 
-        over_idx, under_idx = spec[0], spec[1]
+        under_idx, over_idx = spec[0], spec[1]
         label = spec[3] if len(spec) >= 4 else index
-        normalized.append((over_idx, under_idx, label))
+        normalized.append((under_idx, over_idx, label))
 
     return normalized
 
@@ -136,7 +136,7 @@ def build_svg(vertex_positions, arrows, crossing_specs):
     svg_vertices=[to_svg(p) for p in vertex_positions]
 
     crossing_points={}
-    for over_idx, under_idx, label in crossings:
+    for under_idx, over_idx, label in crossings:
         crossing_points[label]=segment_intersection(
             svg_vertices[arrows[under_idx][0]], svg_vertices[arrows[under_idx][1]],
             svg_vertices[arrows[over_idx][0]],  svg_vertices[arrows[over_idx][1]])
@@ -154,7 +154,7 @@ def build_svg(vertex_positions, arrows, crossing_specs):
             f'stroke="#1f4f82" stroke-width="{STROKE}" stroke-linecap="round"/>'
         )
 
-    for over_idx, under_idx, label in crossings:
+    for under_idx, over_idx, label in crossings:
         cx,cy=crossing_points[label]
         us=svg_vertices[arrows[under_idx][0]]; ue=svg_vertices[arrows[under_idx][1]]
         os=svg_vertices[arrows[over_idx][0]];  oe=svg_vertices[arrows[over_idx][1]]

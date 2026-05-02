@@ -15,17 +15,8 @@ import { getAllKnotNames, getStoredKnotFullNotation, insertKnot } from './db/kno
 
 const router = express.Router()
 const snappyDirPath = fileURLToPath(new URL('./snappy/', import.meta.url))
-const snappyPopulateDbDirPath = fileURLToPath(
-  new URL('./snappy/populate_db/', import.meta.url),
-)
 const snappyAppPath = fileURLToPath(new URL('./snappy/draw_from_db.py', import.meta.url))
 const snappyServePath = fileURLToPath(new URL('./snappy/serve.py', import.meta.url))
-const snappyPopulateDbCinPath = fileURLToPath(
-  new URL('./snappy/populate_db/cin_from_oriented_pd.py', import.meta.url),
-)
-const snappyPopulateDbOrientedPath = fileURLToPath(
-  new URL('./snappy/populate_db/oriented_pd.py', import.meta.url),
-)
 const snappyBaseUrl = 'http://127.0.0.1:5000'
 const localSnappyPythonBin = fileURLToPath(
   new URL('../.venv-snappy/bin/python', import.meta.url),
@@ -70,8 +61,6 @@ function getSnappySourceVersion() {
   return Math.max(
     statSync(snappyAppPath).mtimeMs,
     statSync(snappyServePath).mtimeMs,
-    statSync(snappyPopulateDbCinPath).mtimeMs,
-    statSync(snappyPopulateDbOrientedPath).mtimeMs,
   )
 }
 
@@ -284,12 +273,8 @@ function startSnappyWatchers() {
     return
   }
 
-  for (const watchPath of [snappyDirPath, snappyPopulateDbDirPath]) {
-    const watcher = watch(watchPath, (_eventType, filename) => {
-      if (typeof filename !== 'string' || !filename.endsWith('.py')) {
-        return
-      }
-
+  for (const watchPath of [snappyAppPath, snappyServePath]) {
+    const watcher = watch(watchPath, () => {
       scheduleSnappyRestart()
     })
 

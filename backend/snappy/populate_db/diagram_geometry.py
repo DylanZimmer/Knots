@@ -4,6 +4,8 @@ from collections import defaultdict
 ROLF_TABLE = "diagrams_rolf"
 VERTICES_AND_ARROWS_TABLE = "vertices_and_arrows"
 CROSSING_SPECS_TABLE = "crossing_specs"
+QUERY_PAGE_SIZE = 1000
+DIAGRAM_ID_CHUNK_SIZE = 200
 
 
 def _coerce_int(value, field_name: str) -> int:
@@ -44,7 +46,10 @@ def build_geometry(vertex_and_arrow_rows: list[dict], crossing_spec_rows: list[d
     if not vertex_and_arrow_rows:
         return None
 
-    diagram_id = _coerce_int(vertex_and_arrow_rows[0]["diagram_id"], "vertices_and_arrows.diagram_id")
+    diagram_id = _coerce_int(
+        vertex_and_arrow_rows[0]["diagram_id"],
+        "vertices_and_arrows.diagram_id",
+    )
     vertex_positions: list[list[int | float] | None] = []
     arrows: list[list[int] | None] = []
     crossing_specs: list[list[int] | None] = []
@@ -52,14 +57,14 @@ def build_geometry(vertex_and_arrow_rows: list[dict], crossing_spec_rows: list[d
     for row in vertex_and_arrow_rows:
         start_point = _coerce_int(row["start_point"], "vertices_and_arrows.start_point")
         end_point = _coerce_int(row["end_point"], "vertices_and_arrows.end_point")
-        x = _coerce_number(row["x"], "vertices_and_arrows.x")
-        y = _coerce_number(row["y"], "vertices_and_arrows.y")
+        strand_x = _coerce_number(row["strand_x"], "vertices_and_arrows.strand_x")
+        strand_y = _coerce_number(row["strand_y"], "vertices_and_arrows.strand_y")
 
         while len(vertex_positions) <= start_point:
             vertex_positions.append(None)
             arrows.append(None)
 
-        vertex_positions[start_point] = [x, y]
+        vertex_positions[start_point] = [strand_x, strand_y]
         arrows[start_point] = [start_point, end_point]
 
     for row in crossing_spec_rows:
@@ -77,6 +82,44 @@ def build_geometry(vertex_and_arrow_rows: list[dict], crossing_spec_rows: list[d
         "arrows": _ensure_dense(arrows, "arrows", diagram_id),
         "crossing_specs": _ensure_dense(crossing_specs, "crossing_specs", diagram_id),
     }
+
+
+def _fetch_rows_for_diagram_ids(
+    supabase,
+    get_table,
+    schema_name: str | None,
+    *,
+    table_name: str,
+    select_fields: str,
+    diagram_ids: list[int],
+    order_fields: list[str],
+) -> list[dict]:
+    rows: list[dict] = []
+
+    for chunk_start in range(0, len(diagram_ids), DIAGRAM_ID_CHUNK_SIZE):
+        diagram_id_chunk = diagram_ids[chunk_start : chunk_start + DIAGRAM_ID_CHUNK_SIZE]
+        page_start = 0
+
+        while True:
+            query = (
+                get_table(supabase, schema_name, table_name)
+                .select(select_fields)
+                .in_("diagram_id", diagram_id_chunk)
+            )
+
+            for field_name in order_fields:
+                query = query.order(field_name)
+
+            result = query.range(page_start, page_start + QUERY_PAGE_SIZE - 1).execute()
+            page_rows = result.data or []
+            rows.extend(page_rows)
+
+            if len(page_rows) < QUERY_PAGE_SIZE:
+                break
+
+            page_start += QUERY_PAGE_SIZE
+
+    return rows
 
 
 def fetch_geometry_map_for_base_rows(
@@ -99,28 +142,36 @@ def fetch_geometry_map_for_base_rows(
     if not diagram_ids:
         return {}
 
-    vertex_result = (
-        get_table(supabase, schema_name, VERTICES_AND_ARROWS_TABLE)
-        .select("diagram_id,start_point,end_point,x,y")
-        .in_("diagram_id", diagram_ids)
-        .order("start_point")
-        .execute()
+    vertex_rows = _fetch_rows_for_diagram_ids(
+        supabase,
+        get_table,
+        schema_name,
+        table_name=VERTICES_AND_ARROWS_TABLE,
+        select_fields="diagram_id,start_point,end_point,strand_x,strand_y",
+        diagram_ids=diagram_ids,
+        order_fields=["diagram_id", "start_point"],
     )
-    crossing_result = (
-        get_table(supabase, schema_name, CROSSING_SPECS_TABLE)
-        .select("diagram_id,crossing_id,under_line,over_line")
-        .in_("diagram_id", diagram_ids)
-        .order("crossing_id")
-        .execute()
+    crossing_rows = _fetch_rows_for_diagram_ids(
+        supabase,
+        get_table,
+        schema_name,
+        table_name=CROSSING_SPECS_TABLE,
+        select_fields="diagram_id,crossing_id,under_line,over_line",
+        diagram_ids=diagram_ids,
+        order_fields=["diagram_id", "crossing_id"],
     )
 
     vertices_by_diagram_id: dict[int, list[dict]] = defaultdict(list)
-    for row in vertex_result.data or []:
-        vertices_by_diagram_id[_coerce_int(row["diagram_id"], "vertices_and_arrows.diagram_id")].append(row)
+    for row in vertex_rows:
+        vertices_by_diagram_id[
+            _coerce_int(row["diagram_id"], "vertices_and_arrows.diagram_id")
+        ].append(row)
 
     crossings_by_diagram_id: dict[int, list[dict]] = defaultdict(list)
-    for row in crossing_result.data or []:
-        crossings_by_diagram_id[_coerce_int(row["diagram_id"], "crossing_specs.diagram_id")].append(row)
+    for row in crossing_rows:
+        crossings_by_diagram_id[
+            _coerce_int(row["diagram_id"], "crossing_specs.diagram_id")
+        ].append(row)
 
     geometry_by_base_id = {}
     for base_row in base_rows:
@@ -244,8 +295,12 @@ def replace_geometry(
                     "diagram_id": diagram_id,
                     "start_point": start_point,
                     "end_point": end_point,
-                    "x": _coerce_number(position[0], f"vertex_positions[{index}][0]"),
-                    "y": _coerce_number(position[1], f"vertex_positions[{index}][1]"),
+                    "strand_x": _coerce_number(
+                        position[0], f"vertex_positions[{index}][0]"
+                    ),
+                    "strand_y": _coerce_number(
+                        position[1], f"vertex_positions[{index}][1]"
+                    ),
                 }
             )
 
