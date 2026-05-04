@@ -11,6 +11,53 @@ const addOffset = (x: number, offset: number, precision = 3) => {
   return Number((x + offset).toFixed(precision));
 };
 
+export type MoveWithArgumentDraft = {
+  line: [string, string]
+  twistType: 0 | 1
+}
+
+export type MoveWithArgumentField =
+  | {
+      kind: 'line'
+      key: 'line'
+      label: string
+    }
+  | {
+      kind: 'toggle'
+      key: 'twistType'
+      label: string
+      options: Array<{ label: string; value: 0 | 1 }>
+    }
+
+export type MoveWithArgumentDefinition = {
+  apply: typeof R1_Twist
+  displayName: string
+  fields: MoveWithArgumentField[]
+  createDraft: () => MoveWithArgumentDraft
+  getTwistNum: (fullNotation: FullNotation) => number
+}
+
+function countExistingTwists(fullNotation: FullNotation): number {
+  const twistIds = new Set<number>()
+
+  for (const line of fullNotation) {
+    if (!Number.isInteger(line.crossing_id)) {
+      twistIds.add(line.crossing_id)
+      continue
+    }
+
+    if (!Number.isInteger(line.strand_id)) {
+      twistIds.add(line.strand_id)
+    }
+  }
+
+  return twistIds.size
+}
+
+export function getNextTwistNumber(fullNotation: FullNotation): number {
+  return addOffset(0, 0.1 * (countExistingTwists(fullNotation) + 1))
+}
+
 
 export function getMoveRouteKey(moveName: string): string {
   return moveName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
@@ -43,6 +90,34 @@ export function Smooth(fullNotation: FullNotation): FullNotation {
 export const movesNoArgument: Record<string, (fullNotation: FullNotation) => FullNotation> = {
   'Flip Orientation': flipOrientation,
   'Mirror': mirror
+}
+
+export const movesWithArgument: Record<string, MoveWithArgumentDefinition> = {
+  R1_Twist: {
+    apply: R1_Twist,
+    displayName: 'Twist',
+    fields: [
+      {
+        kind: 'line',
+        key: 'line',
+        label: 'line',
+      },
+      {
+        kind: 'toggle',
+        key: 'twistType',
+        label: 'twistType',
+        options: [
+          { label: 'O', value: 0 },
+          { label: 'U', value: 1 },
+        ],
+      },
+    ],
+    createDraft: () => ({
+      line: ['', ''],
+      twistType: 0,
+    }),
+    getTwistNum: getNextTwistNumber,
+  },
 }
 
 //(OLD) line_in  : {c_id1, p1, s1, edges: a,b, lines: u,v}

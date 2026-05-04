@@ -11,6 +11,24 @@ Point = tuple[float, float]
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+def coerce_number(value, field_name):
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f'{field_name} must be numeric') from exc
+
+    if numeric_value.is_integer():
+        return int(numeric_value)
+
+    return numeric_value
+
+def coerce_int(value, field_name):
+    numeric_value = coerce_number(value, field_name)
+    if isinstance(numeric_value, float) and not numeric_value.is_integer():
+        raise ValueError(f'{field_name} must be an integer')
+
+    return int(numeric_value)
+
 def get_diagram_inputs(data):
     oriented_pd_notation = data.get('oriented_pd_notation')
     if oriented_pd_notation:
@@ -103,7 +121,48 @@ def orientation_arrow_svg(cx, cy, dx, dy, size=6, color="red"):
             pts = f"{cx-s},{cy+s} {cx},{cy-s} {cx+s},{cy+s}"
     return f'<polygon points="{pts}" fill="{color}"/>'
 
+def normalized_vertex_positions(vertex_positions):
+    if not isinstance(vertex_positions, list):
+        raise ValueError('vertex_positions must be a list')
+
+    normalized = []
+    for index, position in enumerate(vertex_positions):
+        if not isinstance(position, (list, tuple)) or len(position) < 2:
+            raise ValueError(
+                f'vertex_positions[{index}] must contain [strand_x, strand_y]'
+            )
+
+        normalized.append(
+            (
+                coerce_number(position[0], f'vertex_positions[{index}][0]'),
+                coerce_number(position[1], f'vertex_positions[{index}][1]'),
+            )
+        )
+
+    return normalized
+
+def normalized_arrows(arrows):
+    if not isinstance(arrows, list):
+        raise ValueError('arrows must be a list')
+
+    normalized = []
+    for index, arrow in enumerate(arrows):
+        if not isinstance(arrow, (list, tuple)) or len(arrow) < 2:
+            raise ValueError(f'arrows[{index}] must contain [start_point, end_point]')
+
+        normalized.append(
+            (
+                coerce_int(arrow[0], f'arrows[{index}][0]'),
+                coerce_int(arrow[1], f'arrows[{index}][1]'),
+            )
+        )
+
+    return normalized
+
 def normalized_crossing_specs(crossing_specs):
+    if not isinstance(crossing_specs, list):
+        raise ValueError('crossing_specs must be a list')
+
     normalized = []
     for index, spec in enumerate(crossing_specs):
         if not isinstance(spec, (list, tuple)) or len(spec) < 2:
@@ -111,8 +170,15 @@ def normalized_crossing_specs(crossing_specs):
                 "Each crossing_spec must contain at least the under and over arrow indexes"
             )
 
-        under_idx, over_idx = spec[0], spec[1]
-        label = spec[3] if len(spec) >= 4 else index
+        under_idx = coerce_int(spec[0], f'crossing_specs[{index}][0]')
+        over_idx = coerce_int(spec[1], f'crossing_specs[{index}][1]')
+        label = (
+            coerce_int(spec[3], f'crossing_specs[{index}][3]')
+            if len(spec) >= 4
+            else coerce_int(spec[2], f'crossing_specs[{index}][2]')
+            if len(spec) >= 3
+            else index
+        )
         normalized.append((under_idx, over_idx, label))
 
     return normalized
@@ -120,7 +186,31 @@ def normalized_crossing_specs(crossing_specs):
 def build_svg(vertex_positions, arrows, crossing_specs):
     W,H=500,500; MARGIN=60; STROKE=10; GAP_STROKE=18; GAP_HALF=18; FONT=13
     INNER_W=W-2*MARGIN; INNER_H=H-2*MARGIN
+    vertex_positions = normalized_vertex_positions(vertex_positions)
+    arrows = normalized_arrows(arrows)
     crossings = normalized_crossing_specs(crossing_specs)
+
+    if not vertex_positions:
+        raise ValueError('vertex_positions must contain at least one vertex')
+
+    if not arrows:
+        raise ValueError('arrows must contain at least one arrow')
+
+    for index, (start_idx, end_idx) in enumerate(arrows):
+        if not 0 <= start_idx < len(vertex_positions):
+            raise ValueError(f'arrows[{index}][0] references missing vertex {start_idx}')
+        if not 0 <= end_idx < len(vertex_positions):
+            raise ValueError(f'arrows[{index}][1] references missing vertex {end_idx}')
+
+    for index, (under_idx, over_idx, _) in enumerate(crossings):
+        if not 0 <= under_idx < len(arrows):
+            raise ValueError(
+                f'crossing_specs[{index}][0] references missing arrow {under_idx}'
+            )
+        if not 0 <= over_idx < len(arrows):
+            raise ValueError(
+                f'crossing_specs[{index}][1] references missing arrow {over_idx}'
+            )
 
     xs=[x for x,_ in vertex_positions]; ys=[y for _,y in vertex_positions]
     min_x,max_x=min(xs),max(xs); min_y,max_y=min(ys),max(ys)

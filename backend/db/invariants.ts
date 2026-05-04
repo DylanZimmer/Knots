@@ -1,11 +1,12 @@
 import { getSupabase } from '../supabase'
 import {
-  type CurrentKnotInvariantsRecord,
+  type DiagramGeometryPayload,
   type KnotInvariantsRecord,
   createHttpError,
   normalizeInvariantValue,
 } from './common'
-import { getKnotIdByName, requireKnotIdByName } from './knots'
+import { getKnotIdByName } from './knots'
+import { getCurrentDiagramGeometry } from './diagrams'
 
 export async function getStoredKnotInvariants(name: string) {
   const supabase = getSupabase()
@@ -48,79 +49,26 @@ export async function getStoredKnotInvariants(name: string) {
   throw createHttpError(404, `No invariants data for '${name}'`)
 }
 
-export async function getLatestCurrentInvariantsRow(): Promise<CurrentKnotInvariantsRecord> {
-  const supabase = getSupabase()
-
-  const { data, error } = await supabase
-    .from('invariants_current')
-    .select('base_name, moves, determinant, alexander_polynomial, jones_polynomial')
-    .limit(1)
-
-  if (error) {
-    throw error
+function getCurrentInvariantBaseName(currentDiagram: DiagramGeometryPayload) {
+  if (
+    typeof currentDiagram.name === 'string' &&
+    currentDiagram.name.trim().length > 0
+  ) {
+    return currentDiagram.name
   }
 
-  const row = ((data ?? []) as CurrentKnotInvariantsRecord[])[0]
-
-  if (!row) {
-    throw createHttpError(404, 'No current invariants are available')
-  }
-
-  return row
+  throw createHttpError(404, 'No current knot diagram is available for invariants')
 }
 
 export async function getCurrentKnotInvariants() {
-  const row = await getLatestCurrentInvariantsRow()
+  const currentDiagram = await getCurrentDiagramGeometry()
+  const baseName = getCurrentInvariantBaseName(currentDiagram)
+  const invariants = await getStoredKnotInvariants(baseName)
 
   return {
-    base_name:
-      typeof row.base_name === 'string' && row.base_name.trim().length > 0
-        ? row.base_name
-        : 'current',
-    determinant: normalizeInvariantValue(row.determinant),
-    alexander_polynomial: normalizeInvariantValue(row.alexander_polynomial),
-    jones_polynomial: normalizeInvariantValue(row.jones_polynomial),
-  }
-}
-
-export async function initializeCurrentInvariants(name: string) {
-  const supabase = getSupabase()
-  const sourceInvariants = await getStoredKnotInvariants(name)
-  await requireKnotIdByName(name, 'current invariants seed')
-
-  const { error: clearError } = await supabase
-    .from('invariants_current')
-    .delete()
-    .not('base_name', 'is', null)
-
-  if (clearError) {
-    throw clearError
-  }
-
-  const { error: insertError } = await supabase.from('invariants_current').insert([
-    {
-      base_name: sourceInvariants.name,
-      moves: [],
-      determinant: sourceInvariants.determinant,
-      alexander_polynomial: sourceInvariants.alexander_polynomial,
-      jones_polynomial: sourceInvariants.jones_polynomial,
-    },
-  ])
-
-  if (insertError) {
-    throw insertError
-  }
-}
-
-export async function syncCurrentInvariantMoves(moves: string[]) {
-  const supabase = getSupabase()
-
-  const { error } = await supabase
-    .from('invariants_current')
-    .update({ moves })
-    .not('base_name', 'is', null)
-
-  if (error) {
-    throw error
+    base_name: invariants.name,
+    determinant: normalizeInvariantValue(invariants.determinant),
+    alexander_polynomial: normalizeInvariantValue(invariants.alexander_polynomial),
+    jones_polynomial: normalizeInvariantValue(invariants.jones_polynomial),
   }
 }

@@ -98,7 +98,8 @@ export function add_twist_to_picture(
     if (polyline.length === 0) {
         return [crossing_specs, vs_and_as];
     }
-    const new_vertices = two_vertices_in_segment(polyline);
+    two_vertices_in_segment(polyline);
+    midpoint_of_polyline(polyline);
     
     return [new_crossing_specs, new_vs_and_as]
 }

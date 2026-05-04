@@ -2,8 +2,8 @@ from collections import defaultdict
 
 
 ROLF_TABLE = "diagrams_rolf"
-VERTICES_AND_ARROWS_TABLE = "vertices_and_arrows"
-CROSSING_SPECS_TABLE = "crossing_specs"
+VERTICES_AND_ARROWS_TABLE = "vertices_and_arrows_rolf"
+CROSSING_SPECS_TABLE = "crossing_specs_rolf"
 QUERY_PAGE_SIZE = 1000
 DIAGRAM_ID_CHUNK_SIZE = 200
 
@@ -52,7 +52,7 @@ def build_geometry(vertex_and_arrow_rows: list[dict], crossing_spec_rows: list[d
     )
     vertex_positions: list[list[int | float] | None] = []
     arrows: list[list[int] | None] = []
-    crossing_specs: list[list[int] | None] = []
+    crossing_specs: list[list[int]] = []
 
     for row in vertex_and_arrow_rows:
         start_point = _coerce_int(row["start_point"], "vertices_and_arrows.start_point")
@@ -72,15 +72,12 @@ def build_geometry(vertex_and_arrow_rows: list[dict], crossing_spec_rows: list[d
         under_line = _coerce_int(row["under_line"], "crossing_specs.under_line")
         over_line = _coerce_int(row["over_line"], "crossing_specs.over_line")
 
-        while len(crossing_specs) <= crossing_id:
-            crossing_specs.append(None)
-
-        crossing_specs[crossing_id] = [under_line, over_line, crossing_id]
+        crossing_specs.append([under_line, over_line, crossing_id])
 
     return {
         "vertex_positions": _ensure_dense(vertex_positions, "vertex_positions", diagram_id),
         "arrows": _ensure_dense(arrows, "arrows", diagram_id),
-        "crossing_specs": _ensure_dense(crossing_specs, "crossing_specs", diagram_id),
+        "crossing_specs": crossing_specs,
     }
 
 

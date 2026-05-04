@@ -73,6 +73,9 @@ function formatInvariantLabel(key: string) {
 }
 
 type MoveFunction = (fullNotation: FullNotation) => FullNotation
+type MoveWithArgumentDefinition = moves.MoveWithArgumentDefinition
+type MoveWithArgumentDraft = moves.MoveWithArgumentDraft
+type MoveWithArgumentField = moves.MoveWithArgumentField
 
 async function readJsonResponse(res: Response) {
   const text = await res.text()
@@ -221,6 +224,9 @@ function App() {
   const [panelSplit, setPanelSplit] = useState(0.58)
   const [workingFullNotation, setWorkingFullNotation] = useState<FullNotation | null>(null)
   const [moveError, setMoveError] = useState<string | null>(null)
+  const [moveWithArgumentDrafts, setMoveWithArgumentDrafts] = useState<
+    Record<string, MoveWithArgumentDraft>
+  >({})
   const [shownInvariantKeys, setShownInvariantKeys] = useState<InvariantKey[]>([])
   const [isEditingInvariants, setIsEditingInvariants] = useState(false)
   const [isDraggingPanelDivider, setIsDraggingPanelDivider] = useState(false)
@@ -263,6 +269,13 @@ function App() {
     () => Object.entries(moves.movesNoArgument) as Array<[string, MoveFunction]>,
     [],
   )
+  const moveWithArgumentEntries = useMemo(
+    () =>
+      Object.entries(moves.movesWithArgument) as Array<
+        [string, MoveWithArgumentDefinition]
+      >,
+    [],
+  )
   const appliedMovesText = useMemo(() => {
     if (!diagramPayload) {
       return payloadError ? 'Unavailable' : 'Loading...'
@@ -286,6 +299,24 @@ function App() {
         : [],
     [invariantsPayload],
   )
+
+  useEffect(() => {
+    setMoveWithArgumentDrafts((current) => {
+      let didChange = false
+      const nextDrafts = { ...current }
+
+      for (const [moveName, definition] of moveWithArgumentEntries) {
+        if (nextDrafts[moveName]) {
+          continue
+        }
+
+        nextDrafts[moveName] = definition.createDraft()
+        didChange = true
+      }
+
+      return didChange ? nextDrafts : current
+    })
+  }, [moveWithArgumentEntries])
 
   // Load the list of available knot names
   useEffect(() => {
@@ -717,6 +748,120 @@ function App() {
     setMoveError(null)
   }
 
+  function getMoveWithArgumentDraft(
+    moveName: string,
+    definition: MoveWithArgumentDefinition,
+  ) {
+    return moveWithArgumentDrafts[moveName] ?? definition.createDraft()
+  }
+
+  function handleMoveLineInputChange(
+    moveName: string,
+    definition: MoveWithArgumentDefinition,
+    index: 0 | 1,
+    value: string,
+  ) {
+    setMoveWithArgumentDrafts((current) => {
+      const draft = current[moveName] ?? definition.createDraft()
+      const nextLine: [string, string] =
+        index === 0 ? [value, draft.line[1]] : [draft.line[0], value]
+
+      return {
+        ...current,
+        [moveName]: {
+          ...draft,
+          line: nextLine,
+        },
+      }
+    })
+  }
+
+  function handleMoveTwistTypeChange(
+    moveName: string,
+    definition: MoveWithArgumentDefinition,
+    twistType: 0 | 1,
+  ) {
+    setMoveWithArgumentDrafts((current) => {
+      const draft = current[moveName] ?? definition.createDraft()
+
+      return {
+        ...current,
+        [moveName]: {
+          ...draft,
+          twistType,
+        },
+      }
+    })
+  }
+
+  function renderMoveWithArgumentField(
+    moveName: string,
+    definition: MoveWithArgumentDefinition,
+    field: MoveWithArgumentField,
+    draft: MoveWithArgumentDraft,
+  ) {
+    if (!activeFullNotation) {
+      return null
+    }
+
+    if (field.kind === 'line') {
+      return (
+        <div key={field.key} className="move_field move_field--inline move_field--line">
+          <div className="move_field_label">{field.label}</div>
+          <div className="move_number_pair">
+            {[0, 1].map((index) => (
+              <input
+                key={index}
+                type="text"
+                inputMode="decimal"
+                className="move_number_input"
+                aria-label={`${moveName} ${field.label} ${index === 0 ? 'first' : 'second'} value`}
+                value={draft.line[index]}
+                onChange={(event) =>
+                  handleMoveLineInputChange(
+                    moveName,
+                    definition,
+                    index === 0 ? 0 : 1,
+                    event.target.value,
+                  )
+                }
+              />
+            ))}
+          </div>
+        </div>
+      )
+    }
+
+    if (field.kind === 'toggle') {
+      return (
+        <div key={field.key} className="move_field move_field--inline move_field--toggle">
+          <div className="move_field_label">{field.label}</div>
+          <div className="move_toggle_group" role="group" aria-label={`${moveName} ${field.label}`}>
+            {field.options.map((option) => {
+              const isSelected = draft.twistType === option.value
+
+              return (
+                <button
+                  key={option.label}
+                  type="button"
+                  className={`move_toggle_button${
+                    isSelected ? ' move_toggle_button--selected' : ''
+                  }`}
+                  aria-pressed={isSelected}
+                  onClick={() =>
+                    handleMoveTwistTypeChange(moveName, definition, option.value)
+                  }
+                >
+                  {option.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )
+    }
+  }
+
   function toggleShownInvariant(key: InvariantKey) {
     setShownInvariantKeys((current) =>
       current.includes(key)
@@ -753,6 +898,24 @@ function App() {
             )
           })}
         </div>
+        {moveWithArgumentEntries.length > 0 ? (
+          <div className="move_argument_list">
+            {moveWithArgumentEntries.map(([moveName, definition]) => {
+              const draft = getMoveWithArgumentDraft(moveName, definition)
+
+              return (
+                <div key={moveName} className="move_argument_item">
+                  <div className="move_argument_name">{definition.displayName}</div>
+                  <div className="move_inline_fields">
+                    {definition.fields.map((field) =>
+                      renderMoveWithArgumentField(moveName, definition, field, draft),
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        ) : null}
       </div>
     )
   }

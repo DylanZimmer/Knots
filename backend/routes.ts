@@ -205,6 +205,10 @@ async function resolveDiagramRenderPayload(
     )
   }
 
+  if (name.trim().toLowerCase() === 'current') {
+    return getCurrentDiagramGeometry()
+  }
+
   return getStoredRolfDiagramGeometry(name)
 }
 

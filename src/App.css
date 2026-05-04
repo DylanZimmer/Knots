@@ -351,37 +351,27 @@ body {
   gap: 8px;
 }
 
-.move_card {
-  border: 1px solid #9ec8dd;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.74);
-  padding: 12px;
-  box-shadow: 0 6px 18px rgba(33, 73, 109, 0.08);
-}
-
-.move_card_header {
+.move_argument_list {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  flex-direction: column;
   gap: 12px;
 }
 
-.move_card_copy {
-  min-width: 0;
+.move_argument_item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 2px 0;
 }
 
-.move_card_title {
-  margin: 0;
+.move_argument_name {
   color: #21496d;
-  font-size: 0.95rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
   line-height: 1.2;
-}
-
-.move_card_description {
-  margin: 6px 0 0;
-  color: #426681;
-  font-size: 0.8rem;
-  line-height: 1.45;
+  text-transform: uppercase;
 }
 
 .move_action_button {
@@ -410,6 +400,121 @@ body {
 .move_action_button:active,
 .move_line_button:active {
   transform: translateY(1px);
+}
+
+.move_inline_fields {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+}
+
+.move_field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.move_field--inline {
+  flex-direction: row;
+  min-width: 0;
+}
+
+.move_field--line {
+  flex: 0 0 auto;
+}
+
+.move_field--toggle {
+  flex: 0 0 auto;
+}
+
+.move_field_label {
+  color: #426681;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.move_toggle_group {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 0;
+  border: 1px solid #9ec8dd;
+  border-radius: 999px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(33, 73, 109, 0.06);
+}
+
+.move_toggle_button {
+  min-width: 46px;
+  border: 0;
+  border-right: 1px solid #9ec8dd;
+  background: #fff;
+  color: #21496d;
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.move_toggle_button:last-child {
+  border-right: 0;
+}
+
+.move_toggle_button--selected {
+  border-color: #21496d;
+  background: #21496d;
+  color: #fff;
+}
+
+.move_toggle_button:hover,
+.move_number_input:hover {
+  background-color: #f7fbff;
+}
+
+.move_number_pair {
+  display: grid;
+  grid-template-columns: repeat(2, 5.5rem);
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.move_number_input {
+  width: 5.5rem;
+  min-width: 5.5rem;
+  border: 1px solid #9ec8dd;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #21496d;
+  padding: 9px 10px;
+  font: inherit;
+}
+
+.move_number_input::-webkit-outer-spin-button,
+.move_number_input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+@media (max-width: 720px) {
+  .move_inline_fields {
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+
+  .move_field--inline {
+    flex-wrap: wrap;
+  }
+}
+
+.move_number_input:focus,
+.move_toggle_button:focus-visible {
+  outline: 2px solid rgba(33, 73, 109, 0.3);
+  outline-offset: 2px;
 }
 
 .move_line_grid {
